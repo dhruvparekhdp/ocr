@@ -12,7 +12,8 @@
     "classify": "node index.js",
     "web": "node server.js",
     "generate-samples": "node scripts/generate-samples.js",
-    "test": "node scripts/generate-samples.js && node index.js ./sample_pdfs"
+    "test": "node scripts/generate-samples.js && node index.js ./sample_pdfs",
+    "local:extract-text": "node scripts/extract-text.js"
   },
   "keywords": [
     "pdf",

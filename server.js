@@ -82,5 +82,6 @@ app.use((err, _req, res, _next) => {
 const port = Number(process.argv[2] ?? process.env.PORT ?? 3000);
 app.listen(port, () => {
   console.log(`📄 PDF Batch Classifier running at http://localhost:${port}`);
-  console.log(`   Classifier: ${getAnalyzerMode() === 'llm' ? 'Claude (LLM)' : 'keyword/regex fallback'}`);
+  const modeLabels = { llm: 'Claude (LLM)', local: 'local fine-tuned model', regex: 'keyword/regex fallback' };
+  console.log(`   Classifier: ${modeLabels[getAnalyzerMode()]}`);
 });

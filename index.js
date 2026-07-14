@@ -31,6 +31,7 @@ import { DOC_TYPES } from './docTypes.js';
 // requires credentials, and this module must still work (via the regex
 // fallback) when none are configured. See resolveAnalyzer() below.
 import { classifyWithLLM } from './llmClassifier.js';
+import { classifyWithLocalLLM } from './localClassifier.js';
 
 export { DOC_TYPES };
 
@@ -42,10 +43,18 @@ export { DOC_TYPES };
 const CONCURRENCY_LIMIT = 8;
 
 /**
- * LLM concurrency is deliberately lower than PDF-parsing concurrency — it's
- * bounded by API rate limits and cost, not local CPU/IO.
+ * Claude API concurrency is deliberately lower than PDF-parsing concurrency —
+ * it's bounded by API rate limits and cost, not local CPU/IO.
  */
 const LLM_CONCURRENCY_LIMIT = 5;
+
+/**
+ * A self-hosted model server has no per-request cost and typically serves
+ * one request at a time efficiently (a single GPU/CPU running one small
+ * model) — concurrency here bounds memory/queueing on that server, not API
+ * quota. Keep it low; raise it if your server can genuinely batch requests.
+ */
+const LOCAL_LLM_CONCURRENCY_LIMIT = 2;
 
 /**
  * Classification keyword table.
@@ -235,24 +244,28 @@ export const analyzeText = (rawText) => {
 /**
  * Picks which analyzer backs a single classification run and how many can
  * run concurrently. Resolved once per run (not per-document) so a batch
- * never mixes LLM and regex classifications, which would make results
- * inconsistent within the same report.
+ * never mixes analyzers, which would make results inconsistent within the
+ * same report.
  *
- * - `CLASSIFIER=llm`   forces the LLM path (errors per-document if the API
- *   call fails — e.g. missing/invalid credentials — same as any other
- *   per-file failure).
+ * - `CLASSIFIER=llm`   forces Claude (errors per-document if the API call
+ *   fails — e.g. missing/invalid credentials — same as any other per-file
+ *   failure).
+ * - `CLASSIFIER=local` forces your self-hosted fine-tuned model — see
+ *   local-llm/ for training it and serve.py for running it. Requires
+ *   local-llm/serve.py already running; point at it via LOCAL_LLM_URL if
+ *   it's not on the default http://127.0.0.1:8008.
  * - `CLASSIFIER=regex` forces the keyword/regex path, regardless of
  *   whether Anthropic credentials are configured. Useful for a fast, free,
- *   fully offline run, or for comparing the two approaches.
- * - Unset (default): LLM if Anthropic credentials are present, else regex
- *   with a one-time warning. The regex path exists as a fallback, not the
- *   recommended default — see README for why keyword matching alone is
- *   unreliable on real-world document variety.
+ *   fully offline run, or for comparing approaches.
+ * - Unset (default): Claude if Anthropic credentials are present, else
+ *   regex with a one-time warning. `local` is never chosen automatically —
+ *   there's no reliable way to detect a running local server without an
+ *   extra network probe, so it's opt-in only.
  *
  * Memoized for the process lifetime so the fallback warning prints once,
  * even though both the startup banner and the actual run call this.
  *
- * @returns {{ analyze: (rawText: string) => Promise<object>, concurrency: number, mode: 'llm'|'regex' }}
+ * @returns {{ analyze: (rawText: string) => Promise<object>, concurrency: number, mode: 'llm'|'local'|'regex' }}
  */
 let cachedAnalyzer = null;
 const resolveAnalyzer = () => {
@@ -265,6 +278,10 @@ const resolveAnalyzer = () => {
   }
   if (forced === 'llm') {
     cachedAnalyzer = { analyze: classifyWithLLM, concurrency: LLM_CONCURRENCY_LIMIT, mode: 'llm' };
+    return cachedAnalyzer;
+  }
+  if (forced === 'local') {
+    cachedAnalyzer = { analyze: classifyWithLocalLLM, concurrency: LOCAL_LLM_CONCURRENCY_LIMIT, mode: 'local' };
     return cachedAnalyzer;
   }
 
@@ -288,7 +305,7 @@ const resolveAnalyzer = () => {
  * used by the CLI/server startup banner so users know what they'll get
  * before any PDFs are processed.
  *
- * @returns {'llm'|'regex'}
+ * @returns {'llm'|'local'|'regex'}
  */
 export const getAnalyzerMode = () => resolveAnalyzer().mode;
 
@@ -313,12 +330,15 @@ const extractTextFromBuffer = async (buffer) => {
 };
 
 /**
- * Extracts raw text from a single PDF file on disk.
+ * Extracts raw text from a single PDF file on disk. Exported so training-data
+ * preparation (scripts/extract-text.js) uses the exact same extraction path
+ * as the live classifier — text fed to a locally-trained model must match
+ * what that model will see at inference time.
  *
  * @param {string} filePath Absolute path to the PDF.
  * @returns {Promise<string>} The PDF's text content.
  */
-const extractTextFromPdf = async (filePath) => {
+export const extractTextFromPdf = async (filePath) => {
   const buffer = await fs.readFile(filePath);
   return extractTextFromBuffer(buffer);
 };

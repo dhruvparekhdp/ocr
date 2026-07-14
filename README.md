@@ -18,28 +18,27 @@ PO Number), and segregates related documents into batches.
   `unbatched` section, grouped by whichever identifier they do carry
   (`INV:<number>`, `PO:<number>`, or `UNIDENTIFIED`).
 
-## Classification engine: LLM by default, regex as a fallback
+## Classification engine: three interchangeable backends
 
-Documents are classified by a single Claude call per PDF (`llmClassifier.js`),
-not keyword regex. Real trade/export paperwork is far too varied for
-hand-tuned patterns to keep up with — see the case study below — and an LLM
-reads the document the way a person would instead of pattern-matching labels
-that may be abbreviated, mislabeled, or nowhere near their value.
+Documents are classified by one of three interchangeable analyzers, chosen
+once per run via the `CLASSIFIER` env var (never mixed within a report):
 
-- **With Anthropic credentials configured** (`ANTHROPIC_API_KEY` env var, or
-  `ant auth login`): every document is classified by Claude using structured
-  outputs, so the response always matches the expected schema.
-- **Without credentials**: falls back automatically to the original
-  keyword/regex classifier (`analyzeText` in `index.js`), with a one-time
-  warning. This keeps the tool fully usable offline/free, at the cost of the
-  brittleness described below.
-- **Force one or the other** with the `CLASSIFIER` env var:
-  ```bash
-  CLASSIFIER=llm   node index.js ./pdfs   # error out per-file if no credentials, rather than silently falling back
-  CLASSIFIER=regex node index.js ./pdfs   # skip the LLM even if credentials are present (free, offline, faster)
-  ```
-- A run never mixes the two — the analyzer is chosen once per run, not
-  per-document, so results in one report are always consistent.
+| `CLASSIFIER=` | Backend | Requires |
+| --- | --- | --- |
+| `llm` (default when credentials present) | Claude, via structured outputs (`llmClassifier.js`) | `ANTHROPIC_API_KEY` / `ant auth login` |
+| `local` | Your own fine-tuned model, served locally (`localClassifier.js` → `local-llm/serve.py`) | A running `local-llm/serve.py`; see below |
+| `regex` (fallback when no credentials) | Keyword/regex matching (`analyzeText` in `index.js`) | Nothing — offline, free |
+
+```bash
+CLASSIFIER=llm   node index.js ./pdfs   # Claude — error out per-file if no credentials, rather than silently falling back
+CLASSIFIER=local node index.js ./pdfs   # your fine-tuned model — see "Training your own local model" below
+CLASSIFIER=regex node index.js ./pdfs   # keyword/regex — free, offline, fastest, least accurate
+```
+
+Leaving `CLASSIFIER` unset auto-picks `llm` if Anthropic credentials are
+configured, else `regex` with a one-time warning. `local` is never chosen
+automatically — there's no reliable way to detect a running local server
+without an extra network probe, so it's opt-in only.
 
 ### Why not keyword regex alone
 
@@ -63,10 +62,130 @@ well after tuning against those four documents (see `CLASSIFICATION_RULES`,
 document family found in the wild would mean another round of pattern
 surgery. The LLM path generalises to new templates without any code changes.
 
+## Training your own local model
+
+Everything under `local-llm/` fine-tunes a small open-weight model on your
+own labeled documents and serves it locally — no data or inference ever
+leaves your machine, and no Anthropic API calls are made once training data
+is prepared. It's a LoRA fine-tune (a small adapter on top of a frozen base
+model), not training from scratch — a full LLM needs vastly more data and
+compute than a document-classification project can supply, while LoRA works
+with a few hundred labeled examples and trains in a reasonable time on a
+single consumer GPU (or slower on CPU/Apple Silicon).
+
+The fine-tuned model is trained to produce the exact same output shape as
+the Claude classifier — `{ documentType, invoiceNumber, poNumber }` — so once
+it's served locally, it's a drop-in swap: `CLASSIFIER=local` instead of
+`CLASSIFIER=llm`, with everything else in the pipeline (PDF extraction,
+batching, the web UI) unchanged.
+
+### 1. Extract text from your labeled PDFs
+
+Reuses the app's own PDF extraction (pdf-parse) so training data matches
+exactly what the model will see at inference time — labeling against a
+different extraction path would train it on a distribution it never
+actually encounters when served:
+
+```bash
+node scripts/extract-text.js ./my_labeled_pdfs ./local-llm/data/texts
+```
+
+Writes one `.txt` file per PDF (same basename) into the output directory.
+
+### 2. Write your labels
+
+One JSON object per line in a `labels.jsonl` file — `fileName` must match
+the `.txt` basename from step 1 (no extension):
+
+```jsonl
+{"fileName": "invoice_047", "documentType": "Invoice", "invoiceNumber": "EXP/25-26/409", "poNumber": "PXP/25-26/4"}
+{"fileName": "po_047", "documentType": "PO", "invoiceNumber": null, "poNumber": "PXP/25-26/4"}
+```
+
+See `local-llm/data/labels.template.jsonl` for a fuller worked example.
+`documentType` must be one of `PO`, `Invoice`, `AWB_BL`, `Shipping Bill`,
+`Unknown`. As a rough guide: a few hundred examples spread across all four
+types will meaningfully outperform the regex fallback; below ~50-100 per
+type, expect shaky results — more labeled data matters more than any
+hyperparameter tuning at this stage.
+
+### 3. Set up the Python environment
+
+```bash
+cd local-llm
+python3 -m venv venv && source venv/bin/activate   # optional but recommended
+pip install -r requirements.txt
+```
+
+Requires internet access on first run only, to download the base model from
+Hugging Face (cached locally afterward — every step from here on is fully
+offline).
+
+### 4. Build the training dataset
+
+```bash
+python3 prepare_dataset.py \
+  --texts-dir ./data/texts \
+  --labels ./data/labels.jsonl \
+  --out-dir ./data
+```
+
+Writes `data/train.jsonl` and `data/val.jsonl` (90/10 split by default,
+`--val-split` to change it).
+
+### 5. Fine-tune
+
+```bash
+python3 train.py \
+  --base-model Qwen/Qwen2.5-0.5B-Instruct \
+  --train-file ./data/train.jsonl \
+  --val-file ./data/val.jsonl \
+  --output-dir ./checkpoints/run1
+```
+
+Defaults to `Qwen/Qwen2.5-0.5B-Instruct` — small enough to fine-tune on CPU
+(slowly) or any GPU. If you have more capable hardware, a larger instruct
+model (e.g. `Qwen/Qwen2.5-1.5B-Instruct`, `Llama-3.2-3B-Instruct`) will
+likely classify more accurately — pass it via `--base-model`. Key flags:
+`--epochs`, `--lr`, `--lora-r`/`--lora-alpha` (LoRA rank/scale),
+`--batch-size`/`--grad-accum` (raise `--batch-size` if you have GPU memory
+to spare; the default of 1 + 8-way gradient accumulation is tuned for
+low-memory setups). Runs on CUDA, Apple Silicon (MPS), or CPU automatically.
+
+### 6. Serve it locally
+
+```bash
+python3 serve.py --base-model Qwen/Qwen2.5-0.5B-Instruct --adapter ./checkpoints/run1 --port 8008
+```
+
+Exposes `POST /classify { "text": "..." }` → `{ documentType, invoiceNumber,
+poNumber }`, plus `GET /health`. Runs entirely locally; no network calls.
+
+### 7. Point the Node app at it
+
+```bash
+CLASSIFIER=local node index.js ./pdfs
+# or, if serve.py is on a different host/port:
+CLASSIFIER=local LOCAL_LLM_URL=http://127.0.0.1:8008 node index.js ./pdfs
+```
+
+Same for the web UI: `CLASSIFIER=local npm run web`.
+
+### Files
+
+| File | Purpose |
+| --- | --- |
+| `local-llm/prompt.py` | Shared prompt/schema definition — used identically by dataset prep and serving, so training and inference never drift apart. |
+| `local-llm/prepare_dataset.py` | Merges extracted text + labels into training-ready JSONL, with train/val split. |
+| `local-llm/train.py` | LoRA fine-tune via `transformers` + `peft`. Masks the loss to the JSON completion only (not the prompt), so training signal isn't diluted by the instruction text. |
+| `local-llm/serve.py` | FastAPI server: loads base model + adapter, exposes `/classify`. Extracts the first `{...}` span from generation output rather than assuming the whole response is valid JSON, since generation can add stray whitespace. |
+| `localClassifier.js` | Node-side HTTP client for `serve.py`, matching `llmClassifier.js`'s interface exactly. |
+
 ## Requirements
 
 - Node.js >= 18
 - Dependencies: [`pdf-parse`](https://www.npmjs.com/package/pdf-parse) **v2.x**, [`@anthropic-ai/sdk`](https://www.npmjs.com/package/@anthropic-ai/sdk)
+- Only if using `CLASSIFIER=local`: Python 3.10+ with `local-llm/requirements.txt` installed (see "Training your own local model" above)
 
 > **Why pdf-parse v2?** The legacy v1.x line bundles 2017-era pdf.js builds
 > that leak global state on modern Node — after the first document, parses
@@ -188,17 +307,20 @@ credentials or with `CLASSIFIER=regex`) works as follows:
 
 | Piece | Responsibility |
 | --- | --- |
-| `docTypes.js` | Shared `DOC_TYPES` constants used by both classifiers and the batching logic. |
-| `llmClassifier.js` | `classifyWithLLM(rawText)` — the default classifier; one Claude call per document via structured outputs. |
+| `docTypes.js` | Shared `DOC_TYPES` constants used by every classifier and the batching logic. |
+| `llmClassifier.js` | `classifyWithLLM(rawText)` — Claude classifier via structured outputs. |
+| `localClassifier.js` | `classifyWithLocalLLM(rawText)` — HTTP client for your self-hosted fine-tuned model (`local-llm/serve.py`). |
 | `analyzeText(rawText)` (in `index.js`) | Regex fallback classifier; returns `{ documentType, invoiceNumber, poNumber }`. |
-| `resolveAnalyzer()` (in `index.js`) | Picks LLM vs regex once per run per the `CLASSIFIER` env var / credential presence described above. |
+| `resolveAnalyzer()` (in `index.js`) | Picks the analyzer once per run per the `CLASSIFIER` env var / credential presence described above. |
 | `extractTextFromPdf(filePath)` | Reads one PDF and extracts raw text via pdf-parse. |
-| `processDirectory(dirPath)` | Parses all PDFs in a directory with bounded concurrency (8 for regex, 5 for LLM); per-file failures are collected, never fatal. |
+| `scripts/extract-text.js` | Dumps raw extracted text for a directory of PDFs — used to build local-model training data from the same extraction path the app uses at inference time. |
+| `processDirectory(dirPath)` | Parses all PDFs in a directory with bounded concurrency (8 regex / 5 Claude / 2 local); per-file failures are collected, never fatal. |
 | `processBuffers(files)` | Same as above but for in-memory `{ fileName, buffer }` pairs — used by the web upload endpoint. |
 | `segregateIntoBatches(analyzedDocs)` | Builds `{ batches, unbatched }` per the anchoring rules above. |
 | `server.js` | Express server: serves `public/index.html` and `POST /api/classify` (multipart upload, in-memory only). |
 | `public/index.html` | Single-page bulk uploader — drag/drop, progress bar, and a rendered batches/orphans/errors view. |
 | `scripts/generate-samples.js` | Dev-only sample PDF generator (pdfkit) for the smoke test. |
+| `local-llm/` | Fine-tuning pipeline for your own local model — see "Training your own local model" above. |
 
 All analysis functions are exported, so they can be unit-tested or reused
 without touching the filesystem.

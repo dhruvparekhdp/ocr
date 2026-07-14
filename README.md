@@ -40,6 +40,24 @@ node index.js [pdfDirectory] [outputFile]
 node index.js ./my_documents ./report.json
 ```
 
+### Bulk upload via web page
+
+Start the server and open the bulk uploader in a browser:
+
+```bash
+npm run web              # http://localhost:3000 (or PORT=xxxx npm run web)
+```
+
+Drag-and-drop (or click to browse) up to 200 PDFs at once — nothing is
+written to disk, files are classified and batched entirely in memory for
+that request, and the page renders the same `batches` / `unbatched` /
+`errors` breakdown described below. The upload also exposes a plain JSON
+API:
+
+```
+POST /api/classify   (multipart/form-data, field name: "documents")
+```
+
 ### End-to-end smoke test
 
 Generates 10 sample PDFs (two complete batches + orphan cases) and runs the
@@ -97,8 +115,11 @@ npm test
 | --- | --- |
 | `extractTextFromPdf(filePath)` | Reads one PDF and extracts raw text via pdf-parse. |
 | `analyzeText(rawText)` | Returns `{ documentType, invoiceNumber, poNumber }`. |
-| `processDirectory(dirPath)` | Parses all PDFs with bounded concurrency (8); per-file failures are collected, never fatal. |
+| `processDirectory(dirPath)` | Parses all PDFs in a directory with bounded concurrency (8); per-file failures are collected, never fatal. |
+| `processBuffers(files)` | Same as above but for in-memory `{ fileName, buffer }` pairs — used by the web upload endpoint. |
 | `segregateIntoBatches(analyzedDocs)` | Builds `{ batches, unbatched }` per the anchoring rules above. |
+| `server.js` | Express server: serves `public/index.html` and `POST /api/classify` (multipart upload, in-memory only). |
+| `public/index.html` | Single-page bulk uploader — drag/drop, progress bar, and a rendered batches/orphans/errors view. |
 | `scripts/generate-samples.js` | Dev-only sample PDF generator (pdfkit) for the smoke test. |
 
 All analysis functions are exported, so they can be unit-tested or reused

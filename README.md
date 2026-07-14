@@ -1,22 +1,90 @@
-# PDF Batch Classifier
+# Document Classifier — White-Label
 
 A Node.js document-processing tool that reads text-based PDFs from a folder,
-classifies each one as **PO**, **Invoice**, **AWB_BL** (Air Waybill / Bill of
-Lading) or **Shipping Bill**, extracts the key identifiers (Invoice Number /
-PO Number), and segregates related documents into batches.
+classifies each one against a **configurable** set of document types,
+extracts a **configurable** set of fields, and segregates related documents
+into batches. "White-label" means one corporate client's deployment can be
+tuned to invoices + purchase orders, another's to bills + transaction
+records + receipts, and another's to something else entirely — all with
+the same code, by editing one file: `config/schema.json`. See
+"White-label configuration" below.
 
 ## How batching works
 
-- **Invoices anchor the batches.** An invoice carries both its own
-  `invoiceNumber` and a `poNumber` reference, so each distinct invoice number
-  opens a batch.
-- **AWB/BL and Shipping Bill** documents join their batch through the
-  `invoiceNumber` printed on them.
-- **PO documents** have no invoice number — they join through the
-  `poNumber` reference found on the batch's invoice.
-- **Orphans** (documents whose counterpart is missing) land in a dedicated
-  `unbatched` section, grouped by whichever identifier they do carry
-  (`INV:<number>`, `PO:<number>`, or `UNIDENTIFIED`).
+Batching is driven by whichever fields are marked `"isBatchKey": true` in
+`config/schema.json` (by default: `documentNumber` and `referenceNumber`) —
+not by any hardcoded document-type relationship:
+
+- Two documents land in the same batch if they **share a non-null value in
+  any batch-key field** — e.g. an Invoice and the Purchase Order it
+  references share a `referenceNumber`; an Invoice and its related transport
+  document could share a `documentNumber`. This is computed as a union-find
+  over shared field values (`segregateIntoBatches` in `index.js`), so it
+  works for whatever document types and relationships a client's schema
+  defines, without the batching code needing to know what those types mean.
+- **Orphans** (documents that don't share a batch-key value with anything
+  else) land in a dedicated `unbatched` section, grouped by whichever
+  batch-key field they do carry a value for (`documentNumber:<value>`,
+  `referenceNumber:<value>`, or `UNIDENTIFIED` if none).
+
+## White-label configuration
+
+Everything client-specific lives in **`config/schema.json`** (loaded once
+per process by `schema.js`; override the path with `SCHEMA_PATH`). Onboard
+a new corporate client, or add a document type an existing client starts
+sending, by editing this one file — no code changes:
+
+```jsonc
+{
+  "productName": "Acme Docs",        // shown in the web UI's title/header
+  "primaryColor": "#4f8cff",         // accent color (any CSS color)
+  "logoUrl": null,                   // optional logo image URL
+
+  "documentTypes": [
+    {
+      "name": "Invoice",
+      "description": "...",          // tells the LLM what this type means
+      "keywords": ["Tax Invoice", "Invoice To", "..."], // regex-fallback classification hints
+      "keywordWeight": 5             // regex-fallback: how strongly these keywords indicate this type
+    }
+    // ...more types. Always include an "Unknown" type as a catch-all.
+  ],
+
+  "fields": [
+    {
+      "name": "documentNumber",      // becomes a key in every document's "fields" object
+      "description": "...",          // tells the LLM what to look for
+      "labels": ["Invoice No", "Receipt No", "..."], // regex-fallback: label text to search for
+      "appliesTo": ["Invoice", "Receipt"],            // which document types this field is extracted for
+      "isBatchKey": true              // whether documents sharing this value should be batched together
+    }
+    // ...more fields
+  ]
+}
+```
+
+**This takes effect differently depending on which classifier backend is
+active** (see below):
+
+- **Claude (`CLASSIFIER=llm`, the default with credentials configured)**
+  adapts to a schema change on the very next request — the system prompt
+  and structured-output JSON schema are built dynamically from
+  `config/schema.json` every time (`llmClassifier.js`). No retraining, no
+  redeploy beyond editing the file.
+- **The regex fallback (`CLASSIFIER=regex`)** also reads the schema
+  dynamically (`index.js`) — classification keywords and field-label
+  patterns are built from the config, not hardcoded — but being regex, it's
+  inherently weaker at generalizing across varied real-world phrasing than
+  Claude is. See "Why not keyword regex alone" below.
+- **Local fine-tuned models (`CLASSIFIER=local`)** do **not** adapt
+  automatically — a trained model's document types and field/tag set are
+  baked in at training time. Changing `config/schema.json` requires
+  retraining before a local model's output matches the new schema. This is
+  an inherent tradeoff of neural nets versus a general-purpose LLM, not a
+  bug — see "Training your own local model" below.
+
+The web UI reads branding and the field/type list from `GET /api/config`
+on load, so it reflects whatever schema is active without any HTML changes.
 
 ## Classification engine: three interchangeable backends
 
@@ -68,9 +136,20 @@ Everything under `local-llm/` trains a model on your own labeled documents
 and serves it locally — no data or inference ever leaves your machine, and
 no Anthropic API calls are made once training data is prepared. There are
 two options, both producing a server with the exact same `POST /classify`
-contract (`{ documentType, invoiceNumber, poNumber }`), so either one is a
-drop-in swap via `CLASSIFIER=local` — the Node app, `localClassifier.js`,
-and the web UI don't know or care which one is running underneath.
+contract (`{ documentType, fields }`), so either one is a drop-in swap via
+`CLASSIFIER=local` — the Node app, `localClassifier.js`, and the web UI
+don't know or care which one is running underneath.
+
+> ⚠️ **Known gap:** unlike `llmClassifier.js` and the regex fallback, the
+> `local-llm/` pipelines do **not** yet read `config/schema.json` — their
+> document types and fields (currently `invoiceNumber`/`poNumber`) are
+> still defined directly in their own Python files (`local-llm/prompt.py`,
+> `local-llm/scratch/labels.py`). If your client's schema differs from that
+> default, either adapt those two files' constants to match your schema
+> before training, or treat `CLASSIFIER=llm`/`regex` as the schema-aware
+> paths for now and revisit local-model schema-awareness later. This is a
+> real limitation to be upfront about, not a hidden one — the Claude path
+> is the one built for varying document types across clients today.
 
 | | `local-llm/` (LoRA fine-tune) | `local-llm/scratch/` (from scratch) |
 | --- | --- | --- |
@@ -306,7 +385,15 @@ node index.js [pdfDirectory] [outputFile]
 
 # e.g.
 node index.js ./my_documents ./report.json
+
+# Use a different client's schema/branding (defaults to ./config/schema.json)
+SCHEMA_PATH=./config/acme-corp.schema.json node index.js ./my_documents ./report.json
 ```
+
+To onboard a new corporate client, copy `config/schema.json` to e.g.
+`config/<client>.schema.json`, edit its document types/fields/branding, and
+point `SCHEMA_PATH` at it — no code changes required (Claude and regex
+paths; see the local-model gap noted above).
 
 ### Bulk upload via web page
 
@@ -337,28 +424,35 @@ npm test
 
 ## Output shape
 
+Per-document analysis always has the shape `{ fileName, documentType, fields }`,
+where `fields` has one key per field configured in `config/schema.json`
+(default schema shown below):
+
 ```jsonc
 {
   "generatedAt": "…",
   "sourceDirectory": "…",
-  "summary": { "totalPdfs": 10, "analyzed": 10, "failed": 0, "batches": 2, "unbatchedGroups": 3 },
+  "summary": { "totalPdfs": 6, "analyzed": 6, "failed": 0, "batches": 1, "unbatchedGroups": 4 },
   "batches": {
     "BATCH-INV-2024-001": {
-      "invoiceNumber": "INV-2024-001",
-      "poNumber": "PO-7788",
-      "fileCount": 4,
+      "documentNumber": "INV-2024-001",
+      "referenceNumber": "PO-7788",
+      "fileCount": 2,
       "documents": [
         { "fileName": "invoice_001.pdf", "documentType": "Invoice" },
-        { "fileName": "awb_001.pdf", "documentType": "AWB_BL" },
-        { "fileName": "po_7788.pdf", "documentType": "PO" },
-        { "fileName": "sb_001.pdf", "documentType": "Shipping Bill" }
+        { "fileName": "po_7788.pdf", "documentType": "Purchase Order" }
       ]
     }
   },
   "unbatched": {
-    "INV:INV-2024-999": [ { "fileName": "awb_orphan.pdf", "documentType": "AWB_BL", "…": "…" } ],
-    "PO:PO-0000":       [ { "fileName": "po_orphan.pdf", "documentType": "PO", "…": "…" } ],
-    "UNIDENTIFIED":     [ { "fileName": "random_note.pdf", "documentType": "Unknown", "…": "…" } ]
+    "documentNumber:TXN-88213": [
+      { "fileName": "transaction_001.pdf", "documentType": "Transaction Record",
+        "fields": { "documentNumber": "TXN-88213", "referenceNumber": null, "date": "2024-06-15", "amount": null } }
+    ],
+    "UNIDENTIFIED": [
+      { "fileName": "random_note.pdf", "documentType": "Unknown",
+        "fields": { "documentNumber": null, "referenceNumber": null, "date": null, "amount": null } }
+    ]
   },
   "errors": [] // PDFs that failed to parse: { fileName, reason }
 }
@@ -366,65 +460,62 @@ npm test
 
 ## Classification & extraction rules
 
-**The LLM path** (`llmClassifier.js`, used whenever Anthropic credentials are
-configured) sends each document's text to Claude with a system prompt
-describing the four document types and the invoice/PO identifier semantics,
-and a JSON schema (`output_config.format`) that constrains the response to
-`{ documentType, invoiceNumber, poNumber }`. There are no keywords or regexes
-to tune — see the prompt in `llmClassifier.js` for the exact rules Claude is
-given.
+**The LLM path** (`llmClassifier.js`, used whenever Anthropic credentials
+are configured) sends each document's text to Claude with a system prompt
+built from `config/schema.json` — listing every configured document type
+and every field with its description and which types it applies to — and a
+JSON schema (`output_config.format`) that constrains the response to
+`{ documentType, fields: { ...one key per configured field... } }`. There
+are no keywords or regexes to tune; edit the schema, not the code.
 
 **The regex fallback** (`analyzeText` in `index.js`, used without
-credentials or with `CLASSIFIER=regex`) works as follows:
+credentials or with `CLASSIFIER=regex`) is also schema-driven, but
+inherently weaker at generalizing — this is *why* the LLM path is the
+default:
 
 - **Classification** is keyword-scored per type (weighted, case-insensitive
-  regex): unambiguous phrases like "Air Waybill" or "Tax Invoice" outweigh
-  generic ones like "Consignee" or "PO No" that appear on several document
-  types. Highest score wins; no hits → `Unknown`.
-  - Real Indian export/customs paperwork puts shipment fields (`Consignee`,
-    `Port of Loading`) and glossary blurbs (`P.O. - Purchase Order`) on
-    *every* document type, not just the one they nominally belong to — those
-    are weighted low (weak supporting evidence) so the phrases that actually
-    name the document ("Commercial Invoice", "Shipping Bill") win outright.
-  - `Proforma Invoice` / `Packing List` classify as `PO` — in many export
-    workflows the proforma invoice is the anchor document a purchase order
-    would otherwise be (referenced by the commercial invoice's own PO/
-    reference field), even though it's not literally titled "Purchase Order".
-- **Invoice number**: labels `Invoice Number`, `Invoice No.`, `Inv No`,
-  `Inv #`, `Invoice#` followed by an alphanumeric ID (must contain a digit).
-- **PO number**: labels `Purchase Order`, `PO No`, `PO #`, `P.O. Number`,
-  `PO Ref`, `Reference (PXP)` followed by an alphanumeric ID.
-- **Fiscal-reference fallback**: when no label match is found, both
-  extractors fall back to the bare `PREFIX/YY-YY/NNN` reference format common
-  in Indian export docs (e.g. `EXP/25-26/409` for an export invoice,
-  `PXP/25-26/4` for a proforma/purchase reference) — needed because
-  multi-column customs forms (shipping-bill EDI printouts) flatten into
-  linear text where a value can land far from, or even before, its label.
-- **Short-capture guard**: any candidate identifier under 4 characters is
-  rejected and extraction keeps searching. Tabular forms often place a label
-  right next to an unrelated column number (e.g. "2.INVOICE NO 3.INVOICE
-  AMOUNT" reads as "INVOICE NO" → "3"), and this filters that out.
-- Identifiers are normalised to uppercase so `inv-2024/001` and
-  `INV-2024/001` batch together.
+  regex), using each type's `keywords` / `keywordWeight` from the schema.
+  Highest score wins; no hits → whichever type is named `"Unknown"`.
+  - Real-world documents put generic fields (shipment details, glossary
+    blurbs, boilerplate) on *every* document type, not just the one they
+    nominally belong to — this is why `keywordWeight` exists: give
+    unambiguous phrases ("Tax Invoice") a high weight and generic
+    supporting phrases a low one, so the true type wins outright. This
+    needed real tuning against genuine documents (see git history for the
+    original case study against real Indian export/customs paperwork) and
+    will likely need retuning for a very different document domain.
+- **Field extraction**: for each field, tries every configured `labels`
+  phrase as a label-adjacent pattern (`"Invoice No: <value>"`), in order,
+  before falling back to a generic `PREFIX/YY-YY/NNN` fiscal-reference
+  format (common in Indian trade docs, e.g. `EXP/25-26/409`) with no label
+  needed at all — useful on multi-column forms where a value lands far from
+  its label.
+- **Short-capture guard**: any candidate value under 4 characters is
+  rejected and extraction keeps searching. Tabular forms often place a
+  label right next to an unrelated column number (e.g. "2.INVOICE NO
+  3.INVOICE AMOUNT" reads as "INVOICE NO" → "3"), and this filters that out.
+- Extracted values are normalised to uppercase so `inv-2024/001` and
+  `INV-2024/001` batch together as the same value.
 
 ## Architecture
 
 | Piece | Responsibility |
 | --- | --- |
-| `docTypes.js` | Shared `DOC_TYPES` constants used by every classifier and the batching logic. |
-| `llmClassifier.js` | `classifyWithLLM(rawText)` — Claude classifier via structured outputs. |
+| `config/schema.json` | The white-label config: branding, document types, fields, batch keys. Single source of truth — see "White-label configuration" above. |
+| `schema.js` | Loads and memoizes `config/schema.json`; exports getters (`getDocumentTypeNames`, `getFieldsForType`, `getBatchKeyFields`, `getBranding`, etc.) used by every other piece below. |
+| `llmClassifier.js` | `classifyWithLLM(rawText)` — Claude classifier; builds its system prompt and structured-output schema dynamically from `schema.js`. |
 | `localClassifier.js` | `classifyWithLocalLLM(rawText)` — HTTP client for your self-hosted fine-tuned model (`local-llm/serve.py`). |
-| `analyzeText(rawText)` (in `index.js`) | Regex fallback classifier; returns `{ documentType, invoiceNumber, poNumber }`. |
+| `analyzeText(rawText)` (in `index.js`) | Regex fallback classifier, also schema-driven; returns `{ documentType, fields }`. |
 | `resolveAnalyzer()` (in `index.js`) | Picks the analyzer once per run per the `CLASSIFIER` env var / credential presence described above. |
 | `extractTextFromPdf(filePath)` | Reads one PDF and extracts raw text via pdf-parse. |
 | `scripts/extract-text.js` | Dumps raw extracted text for a directory of PDFs — used to build local-model training data from the same extraction path the app uses at inference time. |
 | `processDirectory(dirPath)` | Parses all PDFs in a directory with bounded concurrency (8 regex / 5 Claude / 2 local); per-file failures are collected, never fatal. |
 | `processBuffers(files)` | Same as above but for in-memory `{ fileName, buffer }` pairs — used by the web upload endpoint. |
-| `segregateIntoBatches(analyzedDocs)` | Builds `{ batches, unbatched }` per the anchoring rules above. |
-| `server.js` | Express server: serves `public/index.html` and `POST /api/classify` (multipart upload, in-memory only). |
-| `public/index.html` | Single-page bulk uploader — drag/drop, progress bar, and a rendered batches/orphans/errors view. |
-| `scripts/generate-samples.js` | Dev-only sample PDF generator (pdfkit) for the smoke test. |
-| `local-llm/` | Fine-tuning pipeline for your own local model — see "Training your own local model" above. |
+| `segregateIntoBatches(analyzedDocs)` | Union-find over configured batch-key fields — see "How batching works" above. |
+| `server.js` | Express server: serves `public/index.html`, `GET /api/config` (branding + schema for the UI), and `POST /api/classify` (multipart upload, in-memory only). |
+| `public/index.html` | Single-page bulk uploader — drag/drop, progress bar, dynamic field/type rendering, and branding fetched from `/api/config`. |
+| `scripts/generate-samples.js` | Dev-only sample PDF generator (pdfkit) for the smoke test — matches the default `config/schema.json`. |
+| `local-llm/` | Fine-tuning pipeline for your own local model — see "Training your own local model" above. **Targets its own fixed document types/fields independently of `config/schema.json`** — see the note there. |
 
 All analysis functions are exported, so they can be unit-tested or reused
 without touching the filesystem.

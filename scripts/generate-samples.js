@@ -2,10 +2,17 @@
  * Generates a set of sample text-based PDFs into ./sample_pdfs so the
  * classifier can be exercised end-to-end without real customer documents.
  *
+ * Matches config/schema.json's default white-label document types (Invoice,
+ * Purchase Order, Transaction Record, Receipt, Unknown) — exactly the
+ * "sometimes bills, sometimes transaction records" mix a corporate client
+ * might hand this tool. Edit config/schema.json (and this generator, if you
+ * want matching smoke-test fixtures) to model a different client's schema.
+ *
  * Covers:
- *  - two complete batches (PO + Invoice + AWB/BL + Shipping Bill)
- *  - an orphan AWB whose invoice doesn't exist
- *  - an orphan PO with no matching invoice
+ *  - a complete batch: Invoice + Purchase Order linked by referenceNumber
+ *  - a standalone Transaction Record (its own documentNumber, no links)
+ *  - a standalone Receipt
+ *  - an orphan Invoice with no matching PO
  *  - a document with no recognisable keywords (Unknown / unidentified)
  *
  * Usage: node scripts/generate-samples.js [outputDir]
@@ -31,7 +38,7 @@ const writePdf = (fileName, lines) =>
   });
 
 const samples = [
-  // ---- Batch 1: INV-2024-001 / PO-7788 -----------------------------------
+  // ---- Batch: Invoice + PO linked by referenceNumber PO-7788 -------------
   ['po_7788.pdf', [
     'PURCHASE ORDER',
     'PO No: PO-7788',
@@ -39,60 +46,36 @@ const samples = [
     'Supplier: Acme Exports Pvt Ltd',
   ]],
   ['invoice_001.pdf', [
-    'COMMERCIAL INVOICE',
+    'TAX INVOICE',
     'Invoice No.: INV-2024-001',
     'PO Ref: PO-7788',
     'Bill To: Global Traders Inc',
-    'Total Due: USD 12,500.00',
-  ]],
-  ['awb_001.pdf', [
-    'AIR WAYBILL',
-    "Shipper's Copy",
-    'AWB No: 176-44556677',
-    'Invoice No: INV-2024-001',
-    'Consignee: Global Traders Inc',
-    'Port of Loading: BOM',
-  ]],
-  ['sb_001.pdf', [
-    'SHIPPING BILL FOR EXPORT GOODS',
-    'Customs Copy',
-    'SB No: 5544332',
-    'Invoice Number: INV-2024-001',
-    'Port of Export: Nhava Sheva',
+    'Total Due: 12500.00',
   ]],
 
-  // ---- Batch 2: INV-2024-002 / PO-9911 -----------------------------------
-  ['po_9911.pdf', [
-    'Purchase Order',
-    'P.O. Number: PO-9911',
-    'Order Date: 2024-06-10',
+  // ---- Standalone documents (no shared reference fields) -----------------
+  ['transaction_001.pdf', [
+    'ACCOUNT STATEMENT',
+    'Transaction ID: TXN-88213',
+    'Transaction Date: 2024-06-15',
+    'Debit: 450.00',
   ]],
-  ['invoice_002.pdf', [
-    'TAX INVOICE',
-    'Inv No: INV-2024-002',
-    'Purchase Order Ref: PO-9911',
-    'Invoice To: Ocean Freight LLC',
-  ]],
-  ['bl_002.pdf', [
-    'BILL OF LADING (B/L)',
-    'B/L No: MSCU887766',
-    'Invoice#INV-2024-002',
-    'Consignee: Ocean Freight LLC',
-    'Port of Loading: Mundra',
+  ['receipt_001.pdf', [
+    'RECEIPT',
+    'Receipt No: RCPT-3341',
+    'Payment Received',
+    'Amount Paid: 99.00',
   ]],
 
-  // ---- Orphans -------------------------------------------------------------
-  ['awb_orphan.pdf', [
-    'Air Waybill',
-    'AWB No: 098-11223344',
-    'Invoice No: INV-2024-999', // no such invoice → unbatched under INV:
-    'Consignee: Nowhere Corp',
+  // ---- Orphan: Invoice with no matching PO -------------------------------
+  ['invoice_orphan.pdf', [
+    'COMMERCIAL INVOICE',
+    'Invoice Number: INV-2024-999',
+    'Bill To: Nowhere Corp',
+    'Amount Due: 300.00',
   ]],
-  ['po_orphan.pdf', [
-    'PURCHASE ORDER',
-    'PO #: PO-0000',           // no invoice references this PO → unbatched
-    'Order Date: 2024-07-01',
-  ]],
+
+  // ---- Unrecognisable document --------------------------------------------
   ['random_note.pdf', [
     'Meeting notes',
     'Discussed quarterly logistics planning.',

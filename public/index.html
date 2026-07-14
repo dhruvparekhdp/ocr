@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>PDF Batch Classifier — Bulk Upload</title>
+<title>Document Classifier — Bulk Upload</title>
 <style>
   :root {
     --bg: #0b0f14;
@@ -27,9 +27,10 @@
     min-height: 100vh;
   }
   .wrap { max-width: 980px; margin: 0 auto; padding: 40px 20px 80px; }
-  header { margin-bottom: 28px; }
-  h1 { font-size: 1.6rem; margin: 0 0 6px; }
-  header p { color: var(--muted); margin: 0; font-size: 0.95rem; }
+  header { margin-bottom: 28px; display: flex; align-items: center; gap: 14px; }
+  header .logo { height: 36px; width: 36px; border-radius: 8px; object-fit: contain; }
+  header .titles h1 { font-size: 1.6rem; margin: 0 0 6px; }
+  header .titles p { color: var(--muted); margin: 0; font-size: 0.95rem; }
 
   .dropzone {
     border: 2px dashed var(--border);
@@ -137,6 +138,7 @@
     padding: 5px 10px;
     font-size: 0.8rem;
   }
+  .doc-chip .fields { color: var(--muted); font-size: 0.74rem; }
   .type-badge {
     font-size: 0.68rem;
     font-weight: 700;
@@ -144,12 +146,8 @@
     border-radius: 4px;
     text-transform: uppercase;
     letter-spacing: 0.02em;
+    white-space: nowrap;
   }
-  .type-PO { background: #2a3d2a; color: #8fd68f; }
-  .type-Invoice { background: #2a2d4d; color: #9aa5f5; }
-  .type-AWB_BL { background: #3d3120; color: #f0c674; }
-  .type-Shipping\ Bill { background: #3d2333; color: #f090c0; }
-  .type-Unknown { background: #3a3a3a; color: #aaa; }
 
   .orphan-card { border-color: #4d3820; }
   .orphan-card .key { color: var(--warn); font-size: 0.8rem; margin-bottom: 8px; font-weight: 600; }
@@ -174,9 +172,12 @@
 </head>
 <body>
 <div class="wrap">
-  <header>
-    <h1>📄 PDF Batch Classifier</h1>
-    <p>Upload PDFs in bulk — they're classified as PO / Invoice / AWB&nbsp;&amp;&nbsp;BL / Shipping Bill and grouped into batches by Invoice &amp; PO number.</p>
+  <header id="pageHeader">
+    <img class="logo" id="logoImg" style="display:none" alt="Logo" />
+    <div class="titles">
+      <h1 id="titleText">📄 Document Classifier</h1>
+      <p id="subtitleText">Upload documents in bulk — they're classified and grouped into batches by shared reference fields.</p>
+    </div>
   </header>
 
   <div class="dropzone" id="dropzone">
@@ -220,6 +221,60 @@
   /** @type {File[]} */
   let selectedFiles = [];
 
+  /** Populated from /api/config on load — drives branding + per-type badge colors. */
+  let appConfig = { productName: 'Document Classifier', primaryColor: '#4f8cff', logoUrl: null, documentTypes: [], fields: [] };
+
+  const escapeHtml = (str) =>
+    str.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  // --- Branding: fetched once, applied to title/header/accent color --------
+  const applyBranding = (config) => {
+    appConfig = config;
+    document.title = `${config.productName} — Bulk Upload`;
+    document.getElementById('titleText').textContent = `📄 ${config.productName}`;
+    if (config.logoUrl) {
+      const logo = document.getElementById('logoImg');
+      logo.src = config.logoUrl;
+      logo.style.display = '';
+    }
+    document.documentElement.style.setProperty('--accent', config.primaryColor);
+  };
+
+  fetch('/api/config')
+    .then((r) => r.json())
+    .then(applyBranding)
+    .catch(() => {}); // branding is cosmetic — a fetch failure shouldn't block the page from working
+
+  // Deterministic color per document type, so an arbitrary schema (not known
+  // at author time) still gets a stable, distinct badge color per type.
+  const typeColorCache = new Map();
+  const colorForType = (typeName) => {
+    if (typeColorCache.has(typeName)) return typeColorCache.get(typeName);
+    let hash = 0;
+    for (let i = 0; i < typeName.length; i++) hash = (hash * 31 + typeName.charCodeAt(i)) >>> 0;
+    const hue = hash % 360;
+    const color = { bg: `hsl(${hue}, 35%, 20%)`, fg: `hsl(${hue}, 65%, 75%)` };
+    typeColorCache.set(typeName, color);
+    return color;
+  };
+
+  const typeBadge = (typeName) => {
+    const c = colorForType(typeName);
+    return `<span class="type-badge" style="background:${c.bg};color:${c.fg}">${escapeHtml(typeName)}</span>`;
+  };
+
+  /** Renders a document's non-null fields as a compact "name: value" trailer next to its filename. */
+  const fieldsSummary = (fields) => {
+    if (!fields) return '';
+    const parts = Object.entries(fields)
+      .filter(([, value]) => value)
+      .map(([name, value]) => `${escapeHtml(name)}: ${escapeHtml(value)}`);
+    return parts.length ? `<span class="fields">${parts.join(' · ')}</span>` : '';
+  };
+
+  const docChip = (doc) =>
+    `<span class="doc-chip">${typeBadge(doc.documentType)} ${escapeHtml(doc.fileName)} ${fieldsSummary(doc.fields)}</span>`;
+
   const formatBytes = (bytes) => {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -242,9 +297,6 @@
       : '';
     uploadBtn.disabled = selectedFiles.length === 0;
   };
-
-  const escapeHtml = (str) =>
-    str.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   const addFiles = (fileListLike) => {
     const incoming = Array.from(fileListLike).filter(
@@ -343,15 +395,13 @@
     errorBanner.classList.add('active');
   };
 
-  const typeBadge = (type) => `<span class="type-badge type-${type.replace(' ', '\\ ')}">${escapeHtml(type)}</span>`;
-
   const renderResults = (data) => {
     const { summary, batches, unbatched, errors } = data;
 
     let html = '';
 
     html += `<div class="summary-grid">
-      <div class="stat"><div class="value">${summary.totalPdfs}</div><div class="label">Total PDFs</div></div>
+      <div class="stat"><div class="value">${summary.totalPdfs}</div><div class="label">Total documents</div></div>
       <div class="stat ok"><div class="value">${summary.analyzed}</div><div class="label">Analyzed</div></div>
       <div class="stat ok"><div class="value">${summary.batches}</div><div class="label">Batches</div></div>
       <div class="stat warn"><div class="value">${summary.unbatchedGroups}</div><div class="label">Unbatched groups</div></div>
@@ -366,14 +416,12 @@
     } else {
       for (const batchId of batchIds) {
         const b = batches[batchId];
+        const keyFieldEntries = Object.entries(b).filter(([k]) => !['fileCount', 'documents'].includes(k));
+        const keyFieldSummary = keyFieldEntries.map(([k, v]) => `${escapeHtml(k)} <b>${escapeHtml(v)}</b>`).join(' · ');
         html += `<div class="batch-card">
-          <div class="meta"><b>${escapeHtml(batchId)}</b> — Invoice <b>${escapeHtml(b.invoiceNumber)}</b>${
-            b.poNumber ? ` · PO <b>${escapeHtml(b.poNumber)}</b>` : ''
-          } · ${b.fileCount} document${b.fileCount === 1 ? '' : 's'}</div>
+          <div class="meta"><b>${escapeHtml(batchId)}</b>${keyFieldSummary ? ` — ${keyFieldSummary}` : ''} · ${b.fileCount} document${b.fileCount === 1 ? '' : 's'}</div>
           <div class="doc-chip-list">
-            ${b.documents
-              .map((d) => `<span class="doc-chip">${typeBadge(d.documentType)} ${escapeHtml(d.fileName)}</span>`)
-              .join('')}
+            ${b.documents.map(docChip).join('')}
           </div>
         </div>`;
       }
@@ -391,9 +439,7 @@
         html += `<div class="orphan-card">
           <div class="key">${escapeHtml(key)}</div>
           <div class="doc-chip-list">
-            ${docs
-              .map((d) => `<span class="doc-chip">${typeBadge(d.documentType)} ${escapeHtml(d.fileName)}</span>`)
-              .join('')}
+            ${docs.map(docChip).join('')}
           </div>
         </div>`;
       }

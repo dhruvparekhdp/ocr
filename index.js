@@ -1,11 +1,16 @@
 /**
  * ============================================================================
- * PDF Batch Classifier
+ * White-Label Document Classifier
  * ============================================================================
- * Reads all text-based PDFs from a target directory, classifies each one as
- * PO | Invoice | AWB_BL | Shipping Bill, extracts the key identifiers
- * (Invoice Number / PO Number), and segregates related documents into
- * batches anchored on the Invoice.
+ * Reads all text-based PDFs from a target directory, classifies each one
+ * against the document types defined in config/schema.json, extracts the
+ * fields configured for whichever type it detects, and segregates related
+ * documents into batches by whichever fields are marked as batch keys.
+ *
+ * Nothing about document types or fields is hardcoded — a corporate client
+ * whose documents are invoices and bank transaction records, and another
+ * whose documents are bills and receipts, both run on this same code; only
+ * config/schema.json differs. See schema.js and README.
  *
  * Usage:
  *   node index.js [pdfDirectory] [outputFile]
@@ -25,15 +30,13 @@ import process from 'node:process';
 // after the first one fail with "bad XRef entry" — so v2 is required here.
 import { PDFParse } from 'pdf-parse';
 
-import { DOC_TYPES } from './docTypes.js';
+import { getDocumentTypes, getFields, getFieldsForType, getBatchKeyFields } from './schema.js';
 
 // Imported lazily-invoked, not eagerly: constructing the Anthropic client
 // requires credentials, and this module must still work (via the regex
 // fallback) when none are configured. See resolveAnalyzer() below.
 import { classifyWithLLM } from './llmClassifier.js';
 import { classifyWithLocalLLM } from './localClassifier.js';
-
-export { DOC_TYPES };
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -56,116 +59,90 @@ const LLM_CONCURRENCY_LIMIT = 5;
  */
 const LOCAL_LLM_CONCURRENCY_LIMIT = 2;
 
-/**
- * Classification keyword table.
- *
- * Every keyword is a case-insensitive regex fragment with a weight. A document
- * is scored per type by summing the weights of every keyword that appears in
- * its text; the highest-scoring type wins. Weights let unambiguous phrases
- * ("Air Waybill", "Shipping Bill No") dominate generic ones ("Consignee",
- * "PO No") that often appear on several document types at once.
- *
- * Real-world Indian export/customs paperwork (commercial invoices, packing
- * lists, shipping-bill EDI printouts) routinely carries shipment fields
- * ("Consignee", "Port of Loading") and glossary blurbs ("P.O. - Purchase
- * Order") on *every* document type, not just the one they nominally belong
- * to — so those generic fields are weighted low (weak supporting evidence
- * only) while the phrases that actually name the document type ("Commercial
- * Invoice", "Shipping Bill") are weighted high enough to win outright.
- */
-const CLASSIFICATION_RULES = [
-  {
-    type: DOC_TYPES.PO,
-    keywords: [
-      { pattern: /\bpurchase\s+order\b/i, weight: 5 },
-      { pattern: /\bproforma\s+invoice\b/i, weight: 6 }, // the PO-equivalent anchor doc in many export workflows
-      { pattern: /\bpacking\s+list\b/i, weight: 4 },
-      { pattern: /\bpo\s*(?:no|#)\b/i, weight: 2 },
-      { pattern: /\bp\.o\./i, weight: 2 },
-      { pattern: /\border\s+date\b/i, weight: 2 },
-    ],
-  },
-  {
-    type: DOC_TYPES.INVOICE,
-    keywords: [
-      { pattern: /\btax\s+invoice\b/i, weight: 10 },
-      { pattern: /\bcommercial\s+invoice\b/i, weight: 10 },
-      { pattern: /\binvoice\s+to\b/i, weight: 4 },
-      { pattern: /\binv\s*(?:no|#)\b/i, weight: 3 },
-      { pattern: /\bbill\s+to\b/i, weight: 2 },
-      { pattern: /\btotal\s+due\b/i, weight: 2 },
-    ],
-  },
-  {
-    type: DOC_TYPES.AWB_BL,
-    keywords: [
-      { pattern: /\bair\s*waybill\b/i, weight: 5 },
-      { pattern: /\bbill\s+of\s+lading\b/i, weight: 4 },
-      { pattern: /\bawb\b/i, weight: 4 },
-      { pattern: /\bb\/l\b/i, weight: 4 },
-      { pattern: /\bshipper'?s\s+copy\b/i, weight: 3 },
-      { pattern: /\bconsignee\b/i, weight: 1 },
-      { pattern: /\bport\s+of\s+loading\b/i, weight: 1 },
-    ],
-  },
-  {
-    type: DOC_TYPES.SHIPPING_BILL,
-    keywords: [
-      { pattern: /\bshipping\s+bill\s*(?:no|#)?\b/i, weight: 5 },
-      { pattern: /\bsb\s*(?:no|#)\b/i, weight: 4 },
-      { pattern: /\bexport\s+goods\b/i, weight: 3 },
-      { pattern: /\bcustoms\s+copy\b/i, weight: 3 },
-      { pattern: /\blet\s+export\s+copy\b/i, weight: 3 },
-      { pattern: /\bport\s+of\s+export\b/i, weight: 2 },
-    ],
-  },
-];
+const UNKNOWN_TYPE = 'Unknown';
+
+// ---------------------------------------------------------------------------
+// Regex fallback: classification (built from config/schema.json)
+// ---------------------------------------------------------------------------
 
 /**
- * Identifier extraction patterns.
+ * Builds one weighted keyword rule per configured document type, straight
+ * from schema.json's `keywords` / `keywordWeight`. A document is scored per
+ * type by summing the weights of every keyword that appears in its text;
+ * the highest-scoring type wins. This is inherently weaker than the LLM
+ * path — see README "Why not keyword regex alone" — but works fully
+ * offline for whatever schema is configured, not just a hardcoded one.
  *
- * Each regex captures the alphanumeric identifier that follows a known label.
- * The value part accepts letters, digits, '-', '/', '_' and must contain at
- * least one digit (guards against capturing stray words such as "Date" that
- * follow a bare "Purchase Order" heading — enforced by the `(?=...\d)`
- * lookahead). The separator between label and value allows whitespace and
- * punctuation in any order (`[\s:.\-#]*`) since real forms print labels like
- * "INV NO. : EXP/25-26/409" (space, then colon, then space) rather than the
- * tidy "label:value" shape a stricter separator would require.
- *
- * Label-adjacent patterns are tried first for precision; the last pattern in
- * each list is a label-free fallback recognising the `PREFIX/YY-YY/NNN`
- * fiscal-year reference format used broadly in Indian export/customs
- * paperwork (e.g. "EXP/25-26/409" for an export invoice, "PXP/25-26/4" for
- * a proforma invoice / purchase reference). It exists because multi-column
- * customs forms (shipping bills, EDI printouts) flatten into linear text
- * where a value can land far from — or even before — its label, so
- * label-adjacency matching alone misses it.
+ * Memoized: schema.js's own loadSchema() is already memoized per process,
+ * so this just avoids rebuilding the same RegExp objects on every document.
+ */
+let cachedClassificationRules = null;
+const buildClassificationRules = () => {
+  if (cachedClassificationRules) return cachedClassificationRules;
+
+  cachedClassificationRules = getDocumentTypes()
+    .filter((t) => t.name !== UNKNOWN_TYPE)
+    .map((t) => ({
+      type: t.name,
+      weight: t.keywordWeight ?? 5,
+      keywords: (t.keywords || []).map((phrase) => {
+        const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return new RegExp(`\\b${escaped.replace(/\s+/g, '\\s+')}\\b`, 'i');
+      }),
+    }));
+
+  return cachedClassificationRules;
+};
+
+// ---------------------------------------------------------------------------
+// Regex fallback: field extraction (built from config/schema.json)
+// ---------------------------------------------------------------------------
+
+/**
+ * Captures the alphanumeric identifier that follows a known label. The value
+ * part accepts letters, digits, '-', '/', '_' and must contain at least one
+ * digit (guards against capturing stray words like "Date" that follow a
+ * bare heading). The separator between label and value allows whitespace
+ * and punctuation in any order (`[\s:.\-#]*`) since real forms print labels
+ * like "INV NO. : EXP/25-26/409" (space, colon, space) rather than a tidy
+ * "label:value" shape.
  */
 const ID_VALUE = /((?=[A-Z0-9\/\-_]*\d)[A-Z0-9][A-Z0-9\/\-_]*)/.source;
 
-/** Captured identifiers shorter than this are almost always a stray table/column number, not a real ID. */
+/** Captured identifiers shorter than this are almost always a stray table/column number, not a real value. */
 const MIN_ID_LENGTH = 4;
 
-const INVOICE_NUMBER_PATTERNS = [
-  new RegExp(String.raw`\binvoice\s*(?:number|no\.?|#)\s*[\s:.\-#]*` + ID_VALUE, 'gi'),
-  new RegExp(String.raw`\binv\.?\s*(?:no\.?|#)\s*[\s:.\-#]*` + ID_VALUE, 'gi'),
-  new RegExp(String.raw`\binvoice#\s*` + ID_VALUE, 'gi'),
-  // Fallback: bare "EXP/25-26/409"-style export reference, no label needed.
-  /\b(EXP[A-Z]{0,3}\/\d{2,4}[-\/]\d{2,4}\/\d+)\b/gi,
-];
+/**
+ * Generic label-free fallback recognising the `PREFIX/YY-YY/NNN` fiscal-year
+ * reference format common in Indian trade/export paperwork (e.g.
+ * "EXP/25-26/409", "PXP/25-26/4"). Not tied to any specific field — applied
+ * as a last resort for every field, since multi-column forms can flatten
+ * into linear text where a value lands far from (or before) its label.
+ */
+const FISCAL_REFERENCE_FALLBACK = /\b([A-Z]{2,6}\/\d{2,4}[-\/]\d{2,4}\/\d+)\b/gi;
 
-const PO_NUMBER_PATTERNS = [
-  new RegExp(String.raw`\bp\.?\s?o\.?\s*(?:number|no\.?|#|ref)\s*[\s:.\-#]*` + ID_VALUE, 'gi'),
-  new RegExp(String.raw`\bpurchase\s+order\s*(?:number|no\.?|#|ref)?\s*[\s:.\-#]*` + ID_VALUE, 'gi'),
-  new RegExp(String.raw`\breference\s*\(?\s*pxp\s*\)?\s*[\s:.\-#]*` + ID_VALUE, 'gi'),
-  // Fallback: bare "PXP/25-26/4"-style proforma/purchase reference, no label needed.
-  /\b((?:PXP|PI|PFI|PROF)[A-Z]{0,3}\/\d{2,4}[-\/]\d{2,4}\/\d+)\b/gi,
-];
+/**
+ * Builds one ordered list of extraction patterns per configured field, from
+ * its `labels` array in schema.json. Label-adjacent patterns are tried
+ * first for precision; the fiscal-reference fallback is tried last for
+ * every field.
+ */
+let cachedExtractionPatterns = null;
+const buildExtractionPatterns = () => {
+  if (cachedExtractionPatterns) return cachedExtractionPatterns;
 
-// ---------------------------------------------------------------------------
-// Text analysis
-// ---------------------------------------------------------------------------
+  const patternsByField = new Map();
+  for (const field of getFields()) {
+    const labelPatterns = (field.labels || []).map((label) => {
+      const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+      return new RegExp(String.raw`\b${escaped}\s*[\s:.\-#]*` + ID_VALUE, 'gi');
+    });
+    patternsByField.set(field.name, [...labelPatterns, FISCAL_REFERENCE_FALLBACK]);
+  }
+
+  cachedExtractionPatterns = patternsByField;
+  return cachedExtractionPatterns;
+};
 
 /**
  * Normalises an extracted identifier so that "inv-2024/001" and
@@ -174,21 +151,20 @@ const PO_NUMBER_PATTERNS = [
  * @param {string|null} value Raw captured identifier.
  * @returns {string|null} Uppercased, trimmed identifier or null.
  */
-const normalizeId = (value) =>
-  value ? value.trim().toUpperCase().replace(/[.,;:]+$/, '') : null;
+const normalizeId = (value) => (value ? value.trim().toUpperCase().replace(/[.,;:]+$/, '') : null);
 
 /**
  * Runs an ordered list of extraction patterns against the text and returns
- * the first captured identifier that's plausibly real.
+ * the first captured value that's plausibly real.
  *
  * Tries every occurrence of a pattern (not just the first) before moving on
  * to the next pattern, and skips candidates shorter than {@link MIN_ID_LENGTH}.
- * This matters on multi-column customs forms, where a label's *nearest*
- * neighbour in the linearised text is often another column header's leading
- * number (e.g. "2.INVOICE NO 3.INVOICE AMOUNT" reads as "INVOICE NO" → "3"),
- * not the real value — so the first match for a pattern isn't always usable.
+ * This matters on multi-column forms, where a label's *nearest* neighbour in
+ * the linearised text is often another column header's leading number
+ * (e.g. "2.INVOICE NO 3.INVOICE AMOUNT" reads as "INVOICE NO" → "3"), not
+ * the real value — so the first match for a pattern isn't always usable.
  *
- * @param {string} text     Raw PDF text.
+ * @param {string} text Raw PDF text.
  * @param {RegExp[]} patterns Ordered extraction patterns (each with the 'g' flag).
  * @returns {string|null}
  */
@@ -202,43 +178,44 @@ const extractIdentifier = (text, patterns) => {
   return null;
 };
 
+// ---------------------------------------------------------------------------
+// Text analysis
+// ---------------------------------------------------------------------------
+
 /**
- * Classifies raw PDF text and extracts key identifiers.
+ * Classifies raw PDF text against the configured document types and
+ * extracts whichever fields apply to the detected type. This is the regex
+ * fallback — see README "Why not keyword regex alone" for why the LLM path
+ * (llmClassifier.js) is the recommended default; this exists so the tool
+ * still works fully offline/free without Anthropic credentials.
  *
  * @param {string} rawText Full text content of one PDF.
- * @returns {{ documentType: string, invoiceNumber: string|null, poNumber: string|null }}
+ * @returns {{ documentType: string, fields: Record<string, string|null> }}
  */
 export const analyzeText = (rawText) => {
   const text = rawText.replace(/\s+/g, ' '); // collapse layout whitespace
 
   // --- Classification: score every type, highest total wins -------------
-  let documentType = DOC_TYPES.UNKNOWN;
+  let documentType = UNKNOWN_TYPE;
   let bestScore = 0;
 
-  for (const rule of CLASSIFICATION_RULES) {
-    const score = rule.keywords.reduce(
-      (sum, { pattern, weight }) => (pattern.test(text) ? sum + weight : sum),
-      0,
-    );
+  for (const rule of buildClassificationRules()) {
+    const score = rule.keywords.reduce((sum, pattern) => (pattern.test(text) ? sum + rule.weight : sum), 0);
     if (score > bestScore) {
       bestScore = score;
       documentType = rule.type;
     }
   }
 
-  // --- Identifier extraction --------------------------------------------
-  const invoiceNumber =
-    documentType === DOC_TYPES.PO
-      ? null // POs never carry an invoice number
-      : extractIdentifier(text, INVOICE_NUMBER_PATTERNS);
+  // --- Field extraction: only for fields that apply to the detected type -
+  const extractionPatterns = buildExtractionPatterns();
+  const fields = {};
+  for (const field of getFields()) {
+    const applies = getFieldsForType(documentType).some((f) => f.name === field.name);
+    fields[field.name] = applies ? extractIdentifier(text, extractionPatterns.get(field.name)) : null;
+  }
 
-  // PO number is relevant on the PO itself and as a reference on the Invoice.
-  const poNumber =
-    documentType === DOC_TYPES.PO || documentType === DOC_TYPES.INVOICE
-      ? extractIdentifier(text, PO_NUMBER_PATTERNS)
-      : null;
-
-  return { documentType, invoiceNumber, poNumber };
+  return { documentType, fields };
 };
 
 /**
@@ -443,115 +420,114 @@ export const processBuffers = async (files) => {
 // Batching
 // ---------------------------------------------------------------------------
 
+/** Simple union-find (disjoint set) with path compression. */
+class UnionFind {
+  constructor(size) {
+    this.parent = Array.from({ length: size }, (_, i) => i);
+  }
+
+  find(i) {
+    if (this.parent[i] !== i) this.parent[i] = this.find(this.parent[i]);
+    return this.parent[i];
+  }
+
+  union(a, b) {
+    const rootA = this.find(a);
+    const rootB = this.find(b);
+    if (rootA !== rootB) this.parent[rootA] = rootB;
+  }
+}
+
 /**
- * Groups analysed documents into batches.
+ * Groups analysed documents into batches by clustering on shared field
+ * values, using whichever fields are marked `isBatchKey: true` in
+ * config/schema.json.
  *
- * Strategy:
- *  1. Invoices anchor the batches — each distinct invoiceNumber opens a batch
- *     and (via the invoice's PO reference) registers a poNumber → batch link.
- *  2. AWB_BL and Shipping Bill docs join their batch through invoiceNumber.
- *  3. PO docs join through the poNumber recorded from the batch's invoice.
- *  4. Anything that cannot be linked lands in `unbatched`, grouped by
- *     whichever identifier it does have (or "UNIDENTIFIED" if it has none).
+ * Strategy: two documents belong to the same batch if they share a non-null
+ * value in *any* batch-key field — e.g. an Invoice and the Purchase Order it
+ * references share a `referenceNumber`; that same Invoice and its Transport
+ * document share a `documentNumber`. This is a union-find over shared field
+ * values rather than a hardcoded "Invoice anchors, others join" rule, so it
+ * generalises to whatever document types and batch-key fields a client's
+ * schema defines — bills, transaction records, anything — without the
+ * batching logic itself needing to know what those types mean.
  *
- * @param {Array<{fileName: string, documentType: string, invoiceNumber: string|null, poNumber: string|null}>} analyzedDocs
+ * Documents that don't share a batch-key value with anything else land in
+ * `unbatched`, grouped by whichever batch-key field they do have a value
+ * for (or "UNIDENTIFIED" if none).
+ *
+ * @param {Array<{fileName: string, documentType: string, fields: Record<string, string|null>}>} analyzedDocs
  * @returns {{ batches: object, unbatched: object }}
  */
 export const segregateIntoBatches = (analyzedDocs) => {
-  /** @type {Map<string, object>} invoiceNumber -> batch */
-  const batchesByInvoice = new Map();
-  /** @type {Map<string, object>} poNumber -> batch (built from invoices) */
-  const batchesByPo = new Map();
+  const batchKeyFields = getBatchKeyFields();
+  const uf = new UnionFind(analyzedDocs.length);
 
-  const invoices = analyzedDocs.filter((d) => d.documentType === DOC_TYPES.INVOICE);
-  const others = analyzedDocs.filter((d) => d.documentType !== DOC_TYPES.INVOICE);
-
-  // --- Pass 1: anchor batches on invoices --------------------------------
-  for (const doc of invoices) {
-    if (!doc.invoiceNumber) continue; // invoice without a number → orphan later
-
-    let batch = batchesByInvoice.get(doc.invoiceNumber);
-    if (!batch) {
-      batch = {
-        batchId: `BATCH-${doc.invoiceNumber}`,
-        invoiceNumber: doc.invoiceNumber,
-        poNumber: doc.poNumber ?? null,
-        files: [],
-      };
-      batchesByInvoice.set(doc.invoiceNumber, batch);
+  // Union every pair of documents that share a non-null value in the same batch-key field.
+  for (const fieldName of batchKeyFields) {
+    const docIndicesByValue = new Map();
+    analyzedDocs.forEach((doc, i) => {
+      const value = doc.fields?.[fieldName];
+      if (!value) return;
+      if (!docIndicesByValue.has(value)) docIndicesByValue.set(value, []);
+      docIndicesByValue.get(value).push(i);
+    });
+    for (const indices of docIndicesByValue.values()) {
+      for (let i = 1; i < indices.length; i++) uf.union(indices[0], indices[i]);
     }
-    // Keep the first PO reference we see; warn on conflicting references.
-    if (doc.poNumber) {
-      if (batch.poNumber && batch.poNumber !== doc.poNumber) {
-        console.warn(
-          `⚠ Conflicting PO refs for invoice ${doc.invoiceNumber}: ` +
-            `${batch.poNumber} vs ${doc.poNumber} (keeping ${batch.poNumber}).`,
-        );
-      } else {
-        batch.poNumber = doc.poNumber;
-        batchesByPo.set(doc.poNumber, batch);
+  }
+
+  // Group document indices by their union-find root.
+  const groups = new Map();
+  analyzedDocs.forEach((doc, i) => {
+    const root = uf.find(i);
+    if (!groups.has(root)) groups.set(root, []);
+    groups.get(root).push(i);
+  });
+
+  const batches = {};
+  const unbatched = {};
+  let batchCounter = 0;
+
+  for (const indices of groups.values()) {
+    const docsInGroup = indices.map((i) => analyzedDocs[i]);
+
+    if (docsInGroup.length < 2) {
+      // Singleton: no shared batch-key value with any other document.
+      const doc = docsInGroup[0];
+      const firstKeyField = batchKeyFields.find((f) => doc.fields?.[f]);
+      const key = firstKeyField ? `${firstKeyField}:${doc.fields[firstKeyField]}` : 'UNIDENTIFIED';
+      if (!unbatched[key]) unbatched[key] = [];
+      unbatched[key].push({ fileName: doc.fileName, documentType: doc.documentType, fields: doc.fields });
+      continue;
+    }
+
+    // Resolve one representative value per batch-key field across the group,
+    // warning if documents disagree (keeps the first value seen, same
+    // conflict-handling spirit as the original invoice/PO-specific logic).
+    const keyFieldValues = {};
+    for (const fieldName of batchKeyFields) {
+      for (const doc of docsInGroup) {
+        const value = doc.fields?.[fieldName];
+        if (!value) continue;
+        if (keyFieldValues[fieldName] && keyFieldValues[fieldName] !== value) {
+          console.warn(
+            `⚠ Conflicting ${fieldName} values in one batch: ${keyFieldValues[fieldName]} vs ${value} ` +
+              `(keeping ${keyFieldValues[fieldName]}).`,
+          );
+        } else {
+          keyFieldValues[fieldName] = value;
+        }
       }
     }
-    batch.files.push({ fileName: doc.fileName, documentType: doc.documentType });
-  }
 
-  // --- Pass 2: attach the remaining documents ----------------------------
-  /** @type {Map<string, Array<object>>} orphan-group key -> file entries */
-  const unbatchedGroups = new Map();
-
-  const addOrphan = (doc) => {
-    // Group orphans by whatever identifier is available.
-    const key = doc.invoiceNumber
-      ? `INV:${doc.invoiceNumber}`
-      : doc.poNumber
-        ? `PO:${doc.poNumber}`
-        : 'UNIDENTIFIED';
-    if (!unbatchedGroups.has(key)) unbatchedGroups.set(key, []);
-    unbatchedGroups.get(key).push({
-      fileName: doc.fileName,
-      documentType: doc.documentType,
-      invoiceNumber: doc.invoiceNumber,
-      poNumber: doc.poNumber,
-    });
-  };
-
-  // Invoices that never made it into a batch (missing invoice number).
-  for (const doc of invoices) {
-    if (!doc.invoiceNumber) addOrphan(doc);
-  }
-
-  for (const doc of others) {
-    let batch = null;
-
-    if (doc.documentType === DOC_TYPES.PO) {
-      // POs link through the PO reference found on the batch's invoice.
-      batch = doc.poNumber ? batchesByPo.get(doc.poNumber) : null;
-    } else {
-      // AWB_BL / Shipping Bill / Unknown link through the invoice number.
-      batch = doc.invoiceNumber ? batchesByInvoice.get(doc.invoiceNumber) : null;
-    }
-
-    if (batch) {
-      batch.files.push({ fileName: doc.fileName, documentType: doc.documentType });
-    } else {
-      addOrphan(doc);
-    }
-  }
-
-  // --- Shape the final output --------------------------------------------
-  const batches = {};
-  for (const batch of batchesByInvoice.values()) {
-    batches[batch.batchId] = {
-      invoiceNumber: batch.invoiceNumber,
-      poNumber: batch.poNumber,
-      fileCount: batch.files.length,
-      documents: batch.files,
+    batchCounter += 1;
+    const batchLabel = Object.values(keyFieldValues).find(Boolean) || `GROUP-${batchCounter}`;
+    batches[`BATCH-${batchLabel}`] = {
+      ...keyFieldValues,
+      fileCount: docsInGroup.length,
+      documents: docsInGroup.map((doc) => ({ fileName: doc.fileName, documentType: doc.documentType })),
     };
-  }
-
-  const unbatched = {};
-  for (const [key, docs] of unbatchedGroups.entries()) {
-    unbatched[key] = docs;
   }
 
   return { batches, unbatched };

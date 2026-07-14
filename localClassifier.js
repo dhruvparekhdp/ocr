@@ -2,18 +2,24 @@
  * ============================================================================
  * Local (self-hosted) classifier client
  * ============================================================================
- * Calls a locally-served, fine-tuned model (see local-llm/serve.py) instead
- * of the Claude API. Same interface as classifyWithLLM() in llmClassifier.js
- * so resolveAnalyzer() in index.js can swap between "llm" (Claude),
- * "regex" (keyword fallback), and "local" (your fine-tuned model)
- * interchangeably.
+ * Calls a locally-served, fine-tuned model (see local-llm/serve.py or
+ * local-llm/scratch/serve.py) instead of the Claude API. Same interface as
+ * classifyWithLLM() in llmClassifier.js so resolveAnalyzer() in index.js can
+ * swap between "llm" (Claude), "regex" (keyword fallback), and "local"
+ * (your fine-tuned model) interchangeably.
  *
  * Requires a local server already running:
  *   python3 local-llm/serve.py --base-model <...> --adapter <checkpoint dir>
+ *   (or python3 local-llm/scratch/serve.py --model-dir <checkpoint dir>)
+ *
+ * Note for local model authors: unlike the Claude path, a locally trained
+ * model's document types and fields are baked into it at training time —
+ * changing config/schema.json requires retraining before the local server's
+ * output will match the new schema. See README.
  * ============================================================================
  */
 
-import { DOC_TYPES } from './docTypes.js';
+import { getDocumentTypeNames, getAllFieldNames } from './schema.js';
 
 const DEFAULT_LOCAL_LLM_URL = 'http://127.0.0.1:8008';
 
@@ -24,7 +30,7 @@ const DEFAULT_LOCAL_LLM_URL = 'http://127.0.0.1:8008';
  * `resolveAnalyzer` in index.js.
  *
  * @param {string} rawText Full text content of one PDF.
- * @returns {Promise<{ documentType: string, invoiceNumber: string|null, poNumber: string|null }>}
+ * @returns {Promise<{ documentType: string, fields: Record<string, string|null> }>}
  */
 export const classifyWithLocalLLM = async (rawText) => {
   const baseUrl = process.env.LOCAL_LLM_URL || DEFAULT_LOCAL_LLM_URL;
@@ -42,14 +48,18 @@ export const classifyWithLocalLLM = async (rawText) => {
 
   const parsed = await response.json();
 
-  const validTypes = new Set(Object.values(DOC_TYPES));
+  const validTypes = new Set(getDocumentTypeNames());
   if (!validTypes.has(parsed.documentType)) {
-    throw new Error(`Local model returned an invalid documentType: ${JSON.stringify(parsed.documentType)}`);
+    throw new Error(
+      `Local model returned a documentType (${JSON.stringify(parsed.documentType)}) not in config/schema.json — ` +
+        'the model was likely trained against a different schema than the one currently configured.',
+    );
   }
 
-  return {
-    documentType: parsed.documentType,
-    invoiceNumber: parsed.invoiceNumber ?? null,
-    poNumber: parsed.poNumber ?? null,
-  };
+  const fields = {};
+  for (const fieldName of getAllFieldNames()) {
+    fields[fieldName] = parsed.fields?.[fieldName] ?? null;
+  }
+
+  return { documentType: parsed.documentType, fields };
 };

@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 
 import { processBuffers, segregateIntoBatches, getAnalyzerMode } from './index.js';
+import { getBranding, getDocumentTypeNames, getAllFieldNames } from './schema.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -37,6 +38,17 @@ const upload = multer({
 
 const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
+
+// White-label config the web UI reads on load — see config/schema.json and
+// schema.js. Lets a corporate deployment's branding and field/type list
+// drive the page without any HTML/JS changes.
+app.get('/api/config', (_req, res) => {
+  res.json({
+    ...getBranding(),
+    documentTypes: getDocumentTypeNames(),
+    fields: getAllFieldNames(),
+  });
+});
 
 app.post('/api/classify', upload.array('documents', MAX_FILES), async (req, res) => {
   const uploadedFiles = req.files ?? [];

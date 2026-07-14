@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PDF Batch Classifier — Bulk Upload</title>
+<style>
+  :root {
+    --bg: #0b0f14;
+    --panel: #121821;
+    --panel-2: #171f2a;
+    --border: #263041;
+    --text: #e6edf3;
+    --muted: #8b98a9;
+    --accent: #4f8cff;
+    --accent-2: #6ee7b7;
+    --warn: #f4b740;
+    --error: #f36a6a;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 40px 20px 80px; }
+  header { margin-bottom: 28px; }
+  h1 { font-size: 1.6rem; margin: 0 0 6px; }
+  header p { color: var(--muted); margin: 0; font-size: 0.95rem; }
+
+  .dropzone {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    background: var(--panel);
+    padding: 48px 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .dropzone.dragover {
+    border-color: var(--accent);
+    background: #10192b;
+  }
+  .dropzone h2 { margin: 0 0 8px; font-size: 1.05rem; font-weight: 600; }
+  .dropzone p { margin: 0; color: var(--muted); font-size: 0.88rem; }
+  .dropzone input[type="file"] { display: none; }
+
+  .file-list {
+    margin-top: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .file-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 0.85rem;
+  }
+  .file-row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 12px; }
+  .file-row .size { color: var(--muted); flex-shrink: 0; }
+
+  .actions { display: flex; gap: 12px; align-items: center; margin-top: 20px; }
+  button {
+    font: inherit;
+    border: none;
+    border-radius: 8px;
+    padding: 11px 22px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.9rem;
+  }
+  #uploadBtn { background: var(--accent); color: #fff; }
+  #uploadBtn:disabled { background: #2a3546; color: var(--muted); cursor: not-allowed; }
+  #clearBtn { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+  .count { color: var(--muted); font-size: 0.88rem; }
+
+  .progress { margin-top: 16px; display: none; }
+  .progress.active { display: block; }
+  .bar-track { height: 6px; border-radius: 4px; background: var(--panel-2); overflow: hidden; }
+  .bar-fill { height: 100%; width: 0%; background: var(--accent); transition: width 0.2s; }
+  .progress .label { margin-top: 8px; font-size: 0.85rem; color: var(--muted); }
+
+  #results { margin-top: 36px; display: none; }
+  #results.active { display: block; }
+
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 12px;
+    margin-bottom: 28px;
+  }
+  .stat {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+  }
+  .stat .value { font-size: 1.5rem; font-weight: 700; }
+  .stat .label { color: var(--muted); font-size: 0.78rem; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .stat.ok .value { color: var(--accent-2); }
+  .stat.warn .value { color: var(--warn); }
+  .stat.error .value { color: var(--error); }
+
+  section.group { margin-bottom: 24px; }
+  section.group h3 {
+    font-size: 0.95rem;
+    margin: 0 0 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .batch-card, .orphan-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+    margin-bottom: 12px;
+  }
+  .batch-card .meta { color: var(--muted); font-size: 0.82rem; margin-bottom: 10px; }
+  .batch-card .meta b { color: var(--text); }
+  .doc-chip-list { display: flex; flex-wrap: wrap; gap: 8px; }
+  .doc-chip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 10px;
+    font-size: 0.8rem;
+  }
+  .type-badge {
+    font-size: 0.68rem;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+  .type-PO { background: #2a3d2a; color: #8fd68f; }
+  .type-Invoice { background: #2a2d4d; color: #9aa5f5; }
+  .type-AWB_BL { background: #3d3120; color: #f0c674; }
+  .type-Shipping\ Bill { background: #3d2333; color: #f090c0; }
+  .type-Unknown { background: #3a3a3a; color: #aaa; }
+
+  .orphan-card { border-color: #4d3820; }
+  .orphan-card .key { color: var(--warn); font-size: 0.8rem; margin-bottom: 8px; font-weight: 600; }
+
+  .error-card { border-color: #4d2020; }
+  .error-row { display: flex; justify-content: space-between; font-size: 0.85rem; padding: 4px 0; }
+  .error-row .reason { color: var(--error); }
+
+  .empty-note { color: var(--muted); font-size: 0.88rem; font-style: italic; }
+  #errorBanner {
+    display: none;
+    background: #3a1e1e;
+    border: 1px solid #6a3030;
+    color: #ffb3b3;
+    padding: 12px 16px;
+    border-radius: 8px;
+    margin-top: 16px;
+    font-size: 0.88rem;
+  }
+  #errorBanner.active { display: block; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>📄 PDF Batch Classifier</h1>
+    <p>Upload PDFs in bulk — they're classified as PO / Invoice / AWB&nbsp;&amp;&nbsp;BL / Shipping Bill and grouped into batches by Invoice &amp; PO number.</p>
+  </header>
+
+  <div class="dropzone" id="dropzone">
+    <h2>Drop PDF files here, or click to browse</h2>
+    <p>Up to 200 files, 25&nbsp;MB each. Nothing is stored — files are processed in memory for this request only.</p>
+    <input type="file" id="fileInput" accept="application/pdf" multiple />
+  </div>
+
+  <div class="file-list" id="fileList"></div>
+
+  <div class="actions">
+    <button id="uploadBtn" disabled>Classify documents</button>
+    <button id="clearBtn" type="button">Clear</button>
+    <span class="count" id="fileCount"></span>
+  </div>
+
+  <div class="progress" id="progress">
+    <div class="bar-track"><div class="bar-fill" id="barFill"></div></div>
+    <div class="label" id="progressLabel">Uploading…</div>
+  </div>
+
+  <div id="errorBanner"></div>
+
+  <div id="results"></div>
+</div>
+
+<script>
+(() => {
+  const dropzone = document.getElementById('dropzone');
+  const fileInput = document.getElementById('fileInput');
+  const fileList = document.getElementById('fileList');
+  const uploadBtn = document.getElementById('uploadBtn');
+  const clearBtn = document.getElementById('clearBtn');
+  const fileCount = document.getElementById('fileCount');
+  const progress = document.getElementById('progress');
+  const barFill = document.getElementById('barFill');
+  const progressLabel = document.getElementById('progressLabel');
+  const errorBanner = document.getElementById('errorBanner');
+  const results = document.getElementById('results');
+
+  /** @type {File[]} */
+  let selectedFiles = [];
+
+  const formatBytes = (bytes) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const renderFileList = () => {
+    fileList.innerHTML = '';
+    for (const file of selectedFiles) {
+      const row = document.createElement('div');
+      row.className = 'file-row';
+      row.innerHTML = `
+        <span class="name">${escapeHtml(file.name)}</span>
+        <span class="size">${formatBytes(file.size)}</span>
+      `;
+      fileList.appendChild(row);
+    }
+    fileCount.textContent = selectedFiles.length
+      ? `${selectedFiles.length} file${selectedFiles.length === 1 ? '' : 's'} selected`
+      : '';
+    uploadBtn.disabled = selectedFiles.length === 0;
+  };
+
+  const escapeHtml = (str) =>
+    str.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  const addFiles = (fileListLike) => {
+    const incoming = Array.from(fileListLike).filter(
+      (f) => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'),
+    );
+    const existingKeys = new Set(selectedFiles.map((f) => `${f.name}:${f.size}`));
+    for (const f of incoming) {
+      const key = `${f.name}:${f.size}`;
+      if (!existingKeys.has(key)) {
+        selectedFiles.push(f);
+        existingKeys.add(key);
+      }
+    }
+    renderFileList();
+  };
+
+  dropzone.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', (e) => addFiles(e.target.files));
+
+  ['dragenter', 'dragover'].forEach((evt) =>
+    dropzone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      dropzone.classList.add('dragover');
+    }),
+  );
+  ['dragleave', 'drop'].forEach((evt) =>
+    dropzone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('dragover');
+    }),
+  );
+  dropzone.addEventListener('drop', (e) => addFiles(e.dataTransfer.files));
+
+  clearBtn.addEventListener('click', () => {
+    selectedFiles = [];
+    fileInput.value = '';
+    renderFileList();
+    results.classList.remove('active');
+    results.innerHTML = '';
+    errorBanner.classList.remove('active');
+  });
+
+  uploadBtn.addEventListener('click', () => {
+    if (selectedFiles.length === 0) return;
+
+    errorBanner.classList.remove('active');
+    results.classList.remove('active');
+    results.innerHTML = '';
+    progress.classList.add('active');
+    barFill.style.width = '0%';
+    progressLabel.textContent = `Uploading ${selectedFiles.length} file(s)…`;
+    uploadBtn.disabled = true;
+
+    const formData = new FormData();
+    for (const file of selectedFiles) formData.append('documents', file);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/classify');
+
+    xhr.upload.addEventListener('progress', (e) => {
+      if (e.lengthComputable) {
+        const pct = Math.round((e.loaded / e.total) * 100);
+        barFill.style.width = pct + '%';
+        progressLabel.textContent = pct < 100 ? `Uploading… ${pct}%` : 'Classifying documents…';
+      }
+    });
+
+    xhr.onload = () => {
+      progress.classList.remove('active');
+      uploadBtn.disabled = false;
+      let payload;
+      try {
+        payload = JSON.parse(xhr.responseText);
+      } catch {
+        showError('Server returned an invalid response.');
+        return;
+      }
+      if (xhr.status >= 400) {
+        showError(payload.error || 'Something went wrong while classifying documents.');
+        return;
+      }
+      renderResults(payload);
+    };
+
+    xhr.onerror = () => {
+      progress.classList.remove('active');
+      uploadBtn.disabled = false;
+      showError('Network error while uploading files.');
+    };
+
+    xhr.send(formData);
+  });
+
+  const showError = (message) => {
+    errorBanner.textContent = message;
+    errorBanner.classList.add('active');
+  };
+
+  const typeBadge = (type) => `<span class="type-badge type-${type.replace(' ', '\\ ')}">${escapeHtml(type)}</span>`;
+
+  const renderResults = (data) => {
+    const { summary, batches, unbatched, errors } = data;
+
+    let html = '';
+
+    html += `<div class="summary-grid">
+      <div class="stat"><div class="value">${summary.totalPdfs}</div><div class="label">Total PDFs</div></div>
+      <div class="stat ok"><div class="value">${summary.analyzed}</div><div class="label">Analyzed</div></div>
+      <div class="stat ok"><div class="value">${summary.batches}</div><div class="label">Batches</div></div>
+      <div class="stat warn"><div class="value">${summary.unbatchedGroups}</div><div class="label">Unbatched groups</div></div>
+      <div class="stat ${summary.failed ? 'error' : ''}"><div class="value">${summary.failed}</div><div class="label">Failed</div></div>
+    </div>`;
+
+    // --- Batches -------------------------------------------------------
+    html += '<section class="group"><h3>📦 Batches</h3>';
+    const batchIds = Object.keys(batches);
+    if (batchIds.length === 0) {
+      html += '<p class="empty-note">No complete batches were formed.</p>';
+    } else {
+      for (const batchId of batchIds) {
+        const b = batches[batchId];
+        html += `<div class="batch-card">
+          <div class="meta"><b>${escapeHtml(batchId)}</b> — Invoice <b>${escapeHtml(b.invoiceNumber)}</b>${
+            b.poNumber ? ` · PO <b>${escapeHtml(b.poNumber)}</b>` : ''
+          } · ${b.fileCount} document${b.fileCount === 1 ? '' : 's'}</div>
+          <div class="doc-chip-list">
+            ${b.documents
+              .map((d) => `<span class="doc-chip">${typeBadge(d.documentType)} ${escapeHtml(d.fileName)}</span>`)
+              .join('')}
+          </div>
+        </div>`;
+      }
+    }
+    html += '</section>';
+
+    // --- Unbatched -------------------------------------------------------
+    html += '<section class="group"><h3>⚠️ Orphans / Unbatched</h3>';
+    const orphanKeys = Object.keys(unbatched);
+    if (orphanKeys.length === 0) {
+      html += '<p class="empty-note">Nothing orphaned — every document matched a batch.</p>';
+    } else {
+      for (const key of orphanKeys) {
+        const docs = unbatched[key];
+        html += `<div class="orphan-card">
+          <div class="key">${escapeHtml(key)}</div>
+          <div class="doc-chip-list">
+            ${docs
+              .map((d) => `<span class="doc-chip">${typeBadge(d.documentType)} ${escapeHtml(d.fileName)}</span>`)
+              .join('')}
+          </div>
+        </div>`;
+      }
+    }
+    html += '</section>';
+
+    // --- Errors -------------------------------------------------------
+    if (errors && errors.length > 0) {
+      html += '<section class="group"><h3>❌ Parse errors</h3><div class="batch-card error-card">';
+      html += errors
+        .map(
+          (e) =>
+            `<div class="error-row"><span>${escapeHtml(e.fileName)}</span><span class="reason">${escapeHtml(e.reason)}</span></div>`,
+        )
+        .join('');
+      html += '</div></section>';
+    }
+
+    results.innerHTML = html;
+    results.classList.add('active');
+  };
+})();
+</script>
+</body>
+</html>

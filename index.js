@@ -192,13 +192,12 @@ export const analyzeText = (rawText) => {
 // ---------------------------------------------------------------------------
 
 /**
- * Extracts raw text from a single PDF file.
+ * Extracts raw text from a PDF buffer.
  *
- * @param {string} filePath Absolute path to the PDF.
+ * @param {Buffer} buffer Raw PDF bytes.
  * @returns {Promise<string>} The PDF's text content.
  */
-const extractTextFromPdf = async (filePath) => {
-  const buffer = await fs.readFile(filePath);
+const extractTextFromBuffer = async (buffer) => {
   const parser = new PDFParse({ data: new Uint8Array(buffer) });
   try {
     const { text } = await parser.getText();
@@ -206,6 +205,17 @@ const extractTextFromPdf = async (filePath) => {
   } finally {
     await parser.destroy(); // always release pdf.js resources
   }
+};
+
+/**
+ * Extracts raw text from a single PDF file on disk.
+ *
+ * @param {string} filePath Absolute path to the PDF.
+ * @returns {Promise<string>} The PDF's text content.
+ */
+const extractTextFromPdf = async (filePath) => {
+  const buffer = await fs.readFile(filePath);
+  return extractTextFromBuffer(buffer);
 };
 
 /**
@@ -258,6 +268,34 @@ export const processDirectory = async (dirPath) => {
       const filePath = path.join(dirPath, fileName);
       try {
         const rawText = await extractTextFromPdf(filePath);
+        return { ok: true, doc: { fileName, ...analyzeText(rawText) } };
+      } catch (error) {
+        return { ok: false, error: { fileName, reason: error.message } };
+      }
+    },
+    CONCURRENCY_LIMIT,
+  );
+
+  return {
+    analyzedDocs: outcomes.filter((o) => o.ok).map((o) => o.doc),
+    errors: outcomes.filter((o) => !o.ok).map((o) => o.error),
+  };
+};
+
+/**
+ * Analyses PDFs already held in memory (e.g. from a multipart upload),
+ * without touching the filesystem. Same per-file failure isolation and
+ * bounded concurrency as {@link processDirectory}.
+ *
+ * @param {Array<{ fileName: string, buffer: Buffer }>} files
+ * @returns {Promise<{ analyzedDocs: Array<object>, errors: Array<object> }>}
+ */
+export const processBuffers = async (files) => {
+  const outcomes = await mapWithConcurrency(
+    files,
+    async ({ fileName, buffer }) => {
+      try {
+        const rawText = await extractTextFromBuffer(buffer);
         return { ok: true, doc: { fileName, ...analyzeText(rawText) } };
       } catch (error) {
         return { ok: false, error: { fileName, reason: error.message } };

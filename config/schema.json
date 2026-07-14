@@ -6,25 +6,25 @@
     {
       "name": "Invoice",
       "description": "Commercial invoices, tax invoices, bills — a request for payment from seller to buyer.",
-      "keywords": ["Tax Invoice", "Commercial Invoice", "Invoice To", "Bill To", "Total Due", "Amount Due"],
+      "keywords": ["Tax Invoice", "Commercial Invoice", "Invoice To", "Bill To", "Total Due", "Amount Due", "Invoice No", "GSTIN"],
       "keywordWeight": 5
     },
     {
       "name": "Purchase Order",
       "description": "A buyer's order authorizing a purchase, or a proforma/packing-list document that serves the same anchoring role.",
-      "keywords": ["Purchase Order", "PO No", "P.O.", "Order Date", "Proforma Invoice"],
+      "keywords": ["Purchase Order", "PO No", "P.O.", "Order Date", "Proforma Invoice", "Vendor"],
       "keywordWeight": 5
     },
     {
       "name": "Transaction Record",
       "description": "Bank/payment transaction statements, ledger entries, payment confirmations.",
-      "keywords": ["Transaction ID", "Transaction Date", "Statement", "Account Number", "Debit", "Credit", "Payment Reference"],
+      "keywords": ["Transaction ID", "Transaction Date", "Statement", "Account Number", "Debit", "Credit", "Payment Reference", "Balance"],
       "keywordWeight": 5
     },
     {
       "name": "Receipt",
       "description": "Proof of payment for a completed transaction.",
-      "keywords": ["Receipt No", "Receipt Number", "Paid", "Payment Received", "Amount Paid"],
+      "keywords": ["Receipt No", "Receipt Number", "Paid", "Payment Received", "Amount Paid", "Cash Receipt"],
       "keywordWeight": 4
     },
     {
@@ -37,29 +37,47 @@
   "fields": [
     {
       "name": "documentNumber",
-      "description": "The primary identifying number for this document — invoice number, receipt number, transaction ID, etc., whichever applies to the detected document type.",
-      "labels": ["Invoice No", "Invoice Number", "Inv No", "Inv #", "Receipt No", "Receipt Number", "Transaction ID", "Transaction No", "Reference Number"],
+      "description": "The primary identifying number for this document — invoice number, receipt number, transaction ID, etc.",
+      "extractor": "labeledId",
+      "labels": ["Invoice No", "Invoice Number", "Inv No", "Inv #", "Receipt No", "Receipt Number", "Transaction ID", "Transaction No", "Bill No", "Reference No", "Ref No"],
       "appliesTo": ["Invoice", "Transaction Record", "Receipt"],
       "isBatchKey": true
     },
     {
       "name": "referenceNumber",
-      "description": "A purchase-order/proforma/reference number this document points back to, or its own reference number if it is the PO/proforma document itself.",
-      "labels": ["PO No", "P.O. Number", "PO Ref", "Purchase Order Number", "Reference (PXP)"],
+      "description": "A purchase-order / reference number this document points back to, or its own PO number if it is the PO document.",
+      "extractor": "labeledId",
+      "labels": ["PO No", "P.O. Number", "PO Ref", "Purchase Order No", "Purchase Order Number", "Order No"],
       "appliesTo": ["Invoice", "Purchase Order"],
       "isBatchKey": true
     },
     {
+      "name": "companyName",
+      "description": "The issuing company / vendor / merchant name on the document.",
+      "extractor": "company",
+      "appliesTo": ["Invoice", "Purchase Order", "Transaction Record", "Receipt"],
+      "isBatchKey": false
+    },
+    {
+      "name": "address",
+      "description": "A postal address block on the document (issuer or billing address).",
+      "extractor": "address",
+      "appliesTo": ["Invoice", "Purchase Order", "Transaction Record", "Receipt"],
+      "isBatchKey": false
+    },
+    {
       "name": "date",
       "description": "The primary date on the document — invoice date, transaction date, order date, etc.",
-      "labels": ["Date", "Invoice Date", "Transaction Date", "Order Date"],
+      "extractor": "date",
+      "labels": ["Invoice Date", "Transaction Date", "Order Date", "Receipt Date", "Date"],
       "appliesTo": ["Invoice", "Purchase Order", "Transaction Record", "Receipt"],
       "isBatchKey": false
     },
     {
       "name": "amount",
-      "description": "The total monetary amount on the document.",
-      "labels": ["Total", "Total Due", "Amount Due", "Amount Paid", "Total Amount"],
+      "description": "The total / grand-total monetary amount on the document.",
+      "extractor": "amount",
+      "labels": ["Grand Total", "Total Due", "Amount Due", "Amount Paid", "Total Amount", "Net Payable", "Total"],
       "appliesTo": ["Invoice", "Transaction Record", "Receipt"],
       "isBatchKey": false
     }

@@ -25,14 +25,17 @@ from pathlib import Path
 
 import torch
 from datasets import load_dataset
-from peft import LoraConfig, get_peft_model
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
+    BitsAndBytesConfig,
     DataCollatorForSeq2Seq,
     Trainer,
     TrainingArguments,
 )
+
+from hardware import select_device, select_dtype
 
 # Standard attention + MLP projection names for the Qwen2 / Llama-family
 # architectures used by the small instruct models this script targets. If you
@@ -93,25 +96,58 @@ def main():
     parser.add_argument("--max-length", type=int, default=4096)
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--grad-accum", type=int, default=8)
+    parser.add_argument(
+        "--load-in-4bit",
+        action="store_true",
+        help=(
+            "Load the base model in 4-bit (QLoRA) instead of fp16/bf16. Lets a larger "
+            "base model (e.g. 1.5B-3B) fit on a small GPU (~4GB VRAM) at the cost of "
+            "some training speed. Requires the `bitsandbytes` package."
+        ),
+    )
+    parser.add_argument(
+        "--no-gradient-checkpointing",
+        action="store_true",
+        help="Disable gradient checkpointing (on by default). Only turn this off if you have VRAM to spare — it trades some speed for a large drop in memory use.",
+    )
     args = parser.parse_args()
 
-    device = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
-    print(f"Device: {device}")
+    device = select_device()
+    dtype = select_dtype(device)
+    print(f"Device: {device}, dtype: {dtype}")
     if device == "cpu":
         print(
             "⚠ No GPU detected — training will be slow. This still works for a small "
             "model + LoRA + a modest dataset, just budget more time (hours, not minutes)."
         )
+    if args.load_in_4bit and device != "cuda":
+        parser.error("--load-in-4bit requires a CUDA GPU (bitsandbytes has no CPU/MPS kernel).")
 
     tokenizer = AutoTokenizer.from_pretrained(args.base_model)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
+    quant_config = None
+    if args.load_in_4bit:
+        quant_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=dtype,
+            bnb_4bit_use_double_quant=True,
+        )
+
     model = AutoModelForCausalLM.from_pretrained(
         args.base_model,
-        dtype=torch.bfloat16 if device != "cpu" else torch.float32,
+        dtype=dtype if quant_config is None else None,
+        quantization_config=quant_config,
+        device_map={"": 0} if quant_config is not None else None,
     )
-    model.to(device)
+    if quant_config is not None:
+        model = prepare_model_for_kbit_training(
+            model, use_gradient_checkpointing=not args.no_gradient_checkpointing
+        )
+    else:
+        model.to(device)
 
     lora_config = LoraConfig(
         r=args.lora_r,
@@ -123,6 +159,12 @@ def main():
     )
     model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
+
+    if not args.no_gradient_checkpointing:
+        # Required alongside LoRA: only the adapter weights require grad, so
+        # checkpointing needs this to keep gradients flowing back through the
+        # frozen base model's input embeddings during the backward recompute.
+        model.enable_input_require_grads()
 
     data_files = {"train": str(args.train_file)}
     if args.val_file:
@@ -143,7 +185,9 @@ def main():
         logging_steps=5,
         save_strategy="epoch",
         eval_strategy="epoch" if args.val_file else "no",
-        bf16=device != "cpu",
+        bf16=dtype == torch.bfloat16,
+        fp16=dtype == torch.float16,
+        gradient_checkpointing=not args.no_gradient_checkpointing,
         report_to=[],
     )
 

@@ -21,8 +21,9 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 from peft import PeftModel
 from pydantic import BaseModel
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
+from hardware import select_device, select_dtype
 from prompt import VALID_DOC_TYPES, build_messages
 
 app = FastAPI(title="Local PDF Classifier")
@@ -106,21 +107,41 @@ def main():
     parser.add_argument("--adapter", required=True, help="Path to the LoRA adapter directory saved by train.py")
     parser.add_argument("--port", type=int, default=8008)
     parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument(
+        "--load-in-4bit",
+        action="store_true",
+        help="Load the base model in 4-bit. Pass this if you trained with --load-in-4bit; requires a CUDA GPU.",
+    )
     args = parser.parse_args()
 
-    device = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
-    print(f"Device: {device}")
+    device = select_device()
+    dtype = select_dtype(device)
+    print(f"Device: {device}, dtype: {dtype}")
+    if args.load_in_4bit and device != "cuda":
+        parser.error("--load-in-4bit requires a CUDA GPU (bitsandbytes has no CPU/MPS kernel).")
 
     tokenizer = AutoTokenizer.from_pretrained(args.base_model)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
+    quant_config = None
+    if args.load_in_4bit:
+        quant_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=dtype,
+            bnb_4bit_use_double_quant=True,
+        )
+
     base_model = AutoModelForCausalLM.from_pretrained(
         args.base_model,
-        dtype=torch.bfloat16 if device != "cpu" else torch.float32,
+        dtype=dtype if quant_config is None else None,
+        quantization_config=quant_config,
+        device_map={"": 0} if quant_config is not None else None,
     )
     model = PeftModel.from_pretrained(base_model, args.adapter)
-    model.to(device)
+    if quant_config is None:
+        model.to(device)
     model.eval()
 
     print(f"✅ Loaded {args.base_model} + adapter from {args.adapter}")

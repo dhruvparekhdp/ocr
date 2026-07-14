@@ -5,3 +5,7 @@ datasets>=2.20
 accelerate>=0.34
 fastapi>=0.115
 uvicorn[standard]>=0.30
+
+# Optional: only needed for --load-in-4bit (QLoRA). Requires an NVIDIA GPU —
+# skip this on CPU-only or Apple Silicon setups.
+# bitsandbytes>=0.43

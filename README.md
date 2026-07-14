@@ -151,6 +151,19 @@ likely classify more accurately — pass it via `--base-model`. Key flags:
 `--batch-size`/`--grad-accum` (raise `--batch-size` if you have GPU memory
 to spare; the default of 1 + 8-way gradient accumulation is tuned for
 low-memory setups). Runs on CUDA, Apple Silicon (MPS), or CPU automatically.
+Gradient checkpointing is on by default (trades some speed for much lower
+memory use — disable with `--no-gradient-checkpointing` only if you have
+VRAM to spare). Precision auto-selects fp16 on GPUs without bf16 tensor-core
+support (anything older than RTX 30-series) and bf16 on newer ones.
+
+> **On a 4GB-VRAM GPU** (e.g. a laptop GTX card): stick with the
+> `Qwen2.5-0.5B-Instruct` default — it fits comfortably with gradient
+> checkpointing on, at the default batch size of 1. If accuracy isn't good
+> enough once you have real training data and want to try a larger model
+> (1.5B–3B), add `--load-in-4bit` (QLoRA) — it quantizes the frozen base
+> model to 4-bit so a bigger model fits in the same VRAM budget, at some cost
+> to training speed. Requires `pip install bitsandbytes` and an NVIDIA GPU
+> (uncomment the line in `requirements.txt`).
 
 ### 6. Serve it locally
 
@@ -160,6 +173,8 @@ python3 serve.py --base-model Qwen/Qwen2.5-0.5B-Instruct --adapter ./checkpoints
 
 Exposes `POST /classify { "text": "..." }` → `{ documentType, invoiceNumber,
 poNumber }`, plus `GET /health`. Runs entirely locally; no network calls.
+Pass `--load-in-4bit` here too if you trained with it — serving needs to
+load the base model the same way training did.
 
 ### 7. Point the Node app at it
 
@@ -176,6 +191,7 @@ Same for the web UI: `CLASSIFIER=local npm run web`.
 | File | Purpose |
 | --- | --- |
 | `local-llm/prompt.py` | Shared prompt/schema definition — used identically by dataset prep and serving, so training and inference never drift apart. |
+| `local-llm/hardware.py` | Shared device/precision selection (fp16 vs bf16 vs CPU) — used identically by `train.py` and `serve.py` so they always agree on how the model was loaded. |
 | `local-llm/prepare_dataset.py` | Merges extracted text + labels into training-ready JSONL, with train/val split. |
 | `local-llm/train.py` | LoRA fine-tune via `transformers` + `peft`. Masks the loss to the JSON completion only (not the prompt), so training signal isn't diluted by the instruction text. |
 | `local-llm/serve.py` | FastAPI server: loads base model + adapter, exposes `/classify`. Extracts the first `{...}` span from generation output rather than assuming the whole response is valid JSON, since generation can add stray whitespace. |

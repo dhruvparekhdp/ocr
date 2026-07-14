@@ -1,0 +1,5 @@
+node_modules/
+batches.json
+sample_pdfs/
+pdfs/
+*.log

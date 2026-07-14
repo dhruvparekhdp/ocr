@@ -1,0 +1,31 @@
+{
+  "name": "pdf-batch-classifier",
+  "version": "1.0.0",
+  "description": "Parses text-based PDFs, classifies them (PO / Invoice / AWB_BL / Shipping Bill), extracts Invoice & PO numbers, and segregates related documents into batches.",
+  "type": "module",
+  "main": "index.js",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "classify": "node index.js",
+    "generate-samples": "node scripts/generate-samples.js",
+    "test": "node scripts/generate-samples.js && node index.js ./sample_pdfs"
+  },
+  "keywords": [
+    "pdf",
+    "ocr",
+    "classification",
+    "invoice",
+    "purchase-order",
+    "document-processing"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "pdf-parse": "^2.4.5"
+  },
+  "devDependencies": {
+    "pdfkit": "^0.15.2"
+  }
+}

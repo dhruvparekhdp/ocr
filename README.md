@@ -64,20 +64,24 @@ surgery. The LLM path generalises to new templates without any code changes.
 
 ## Training your own local model
 
-Everything under `local-llm/` fine-tunes a small open-weight model on your
-own labeled documents and serves it locally — no data or inference ever
-leaves your machine, and no Anthropic API calls are made once training data
-is prepared. It's a LoRA fine-tune (a small adapter on top of a frozen base
-model), not training from scratch — a full LLM needs vastly more data and
-compute than a document-classification project can supply, while LoRA works
-with a few hundred labeled examples and trains in a reasonable time on a
-single consumer GPU (or slower on CPU/Apple Silicon).
+Everything under `local-llm/` trains a model on your own labeled documents
+and serves it locally — no data or inference ever leaves your machine, and
+no Anthropic API calls are made once training data is prepared. There are
+two options, both producing a server with the exact same `POST /classify`
+contract (`{ documentType, invoiceNumber, poNumber }`), so either one is a
+drop-in swap via `CLASSIFIER=local` — the Node app, `localClassifier.js`,
+and the web UI don't know or care which one is running underneath.
 
-The fine-tuned model is trained to produce the exact same output shape as
-the Claude classifier — `{ documentType, invoiceNumber, poNumber }` — so once
-it's served locally, it's a drop-in swap: `CLASSIFIER=local` instead of
-`CLASSIFIER=llm`, with everything else in the pipeline (PDF extraction,
-batching, the web UI) unchanged.
+| | `local-llm/` (LoRA fine-tune) | `local-llm/scratch/` (from scratch) |
+| --- | --- | --- |
+| Base | Fine-tunes a small pretrained model (`Qwen2.5-0.5B-Instruct` by default) | No pretrained weights at all — random init, your own tokenizer, your own architecture (`model.py`) |
+| Dependencies | `transformers`, `peft`, `accelerate`, (optionally `bitsandbytes` for QLoRA) | Just `torch` + `tokenizers` — no Hugging Face Hub model downloads, ever |
+| Labeled data needed | A few hundred examples can work, since the base model already understands language | Low thousands recommended — the model learns everything, including "what text looks like," from your data alone |
+| How extraction works | The model generates the identifier as free text (JSON completion) | A BIO tagging head points at which tokens are the identifier; the exact substring is recovered via tokenizer offsets — easier to learn from scratch than free-text generation |
+| Best for | Faster to get working accurately with less labeled data | No dependency on any third-party model/weights whatsoever |
+
+Steps 1–2 below (extracting text, writing labels) are shared by both paths.
+Steps 3+ diverge — pick one.
 
 ### 1. Extract text from your labeled PDFs
 
@@ -108,6 +112,8 @@ See `local-llm/data/labels.template.jsonl` for a fuller worked example.
 types will meaningfully outperform the regex fallback; below ~50-100 per
 type, expect shaky results — more labeled data matters more than any
 hyperparameter tuning at this stage.
+
+### Option A: LoRA fine-tune (Qwen)
 
 ### 3. Set up the Python environment
 
@@ -197,11 +203,93 @@ Same for the web UI: `CLASSIFIER=local npm run web`.
 | `local-llm/serve.py` | FastAPI server: loads base model + adapter, exposes `/classify`. Extracts the first `{...}` span from generation output rather than assuming the whole response is valid JSON, since generation can add stray whitespace. |
 | `localClassifier.js` | Node-side HTTP client for `serve.py`, matching `llmClassifier.js`'s interface exactly. |
 
+### Option B: From scratch — no Qwen, no QLoRA, no Hugging Face Hub
+
+Everything under `local-llm/scratch/` trains its own model from random
+weights: your own BPE tokenizer, a small transformer encoder defined in
+`model.py` (not downloaded from anywhere), with two heads on one shared
+encoder — a classification head for `documentType`, and a **BIO
+token-tagging head** for `invoiceNumber`/`poNumber`. Extraction is framed as
+tagging (which tokens are part of the identifier), not free-text generation
+— a from-scratch model has no pretrained ability to "copy text out of
+context," so tagging is a far more learnable task for it. The exact
+identifier substring is recovered afterward via the tokenizer's character
+offsets. The only dependencies are `torch`, `tokenizers`, and `fastapi`/
+`uvicorn` for serving — see `local-llm/scratch/requirements.txt`.
+
+```bash
+cd local-llm/scratch
+pip install -r requirements.txt
+```
+
+**1. Train your own tokenizer** (on the same extracted `.txt` files from
+step 1 above — more text improves vocabulary coverage, even unlabeled text
+from documents you haven't labeled yet helps here):
+
+```bash
+python3 train_tokenizer.py --texts-dir ../data/texts --vocab-size 8000 --output-dir ./tokenizer
+```
+
+**2. Build the training dataset** (uses the same `labels.jsonl` format as
+Option A):
+
+```bash
+python3 prepare_dataset.py \
+  --texts-dir ../data/texts \
+  --labels ../data/labels.jsonl \
+  --tokenizer ./tokenizer/tokenizer.json \
+  --out-dir ./data
+```
+
+Watch the output for `invoiceNumber`/`poNumber` "not found verbatim"
+warnings — since extraction is trained by locating the exact identifier
+string inside the extracted text, a label that doesn't match the text
+character-for-character (whitespace differences, transcription typos)
+silently contributes no extraction signal for that example.
+
+**3. Train:**
+
+```bash
+python3 train.py \
+  --tokenizer ./tokenizer/tokenizer.json \
+  --train-file ./data/train.jsonl \
+  --val-file ./data/val.jsonl \
+  --output-dir ./checkpoints/run1
+```
+
+Reports `doc_type_accuracy` and exact-match rate for each identifier every
+epoch — these are the metrics that actually matter end-to-end, not just
+loss. Default model size (~embed-dim 256, 4 layers) is small enough to train
+at a reasonable pace even on CPU, since there's no pretraining phase — the
+whole training cost is your labeled dataset. Key flags: `--epochs`, `--lr`,
+`--embed-dim`/`--num-layers`/`--num-heads`/`--ff-dim` (model size),
+`--tag-loss-weight` (balance between classification and extraction loss if
+one is lagging the other).
+
+**4. Serve and point the Node app at it** — identical to Option A from here:
+
+```bash
+python3 serve.py --model-dir ./checkpoints/run1 --port 8008
+# then, from the project root:
+CLASSIFIER=local node index.js ./pdfs
+```
+
+#### Files
+
+| File | Purpose |
+| --- | --- |
+| `local-llm/scratch/labels.py` | Shared label scheme (`DOC_TYPES`, BIO `TAGS`) plus the span↔tag conversion used identically by dataset prep and serving. |
+| `local-llm/scratch/model.py` | The from-scratch model: embedding + sinusoidal positional encoding + `nn.TransformerEncoder`, with masked mean-pooling for classification and per-token logits for tagging. |
+| `local-llm/scratch/train_tokenizer.py` | Trains a byte-level BPE tokenizer on your own text corpus via the standalone `tokenizers` library. |
+| `local-llm/scratch/prepare_dataset.py` | Converts labels into token ids + BIO tag ids by locating each identifier substring in the extracted text and tagging the tokens it overlaps. |
+| `local-llm/scratch/train.py` | Multi-task training loop (classification + tagging loss), hand-rolled warmup/decay schedule — no `transformers` Trainer. |
+| `local-llm/scratch/serve.py` | FastAPI server with the same `/classify` contract as Option A's `serve.py`. |
+
 ## Requirements
 
 - Node.js >= 18
 - Dependencies: [`pdf-parse`](https://www.npmjs.com/package/pdf-parse) **v2.x**, [`@anthropic-ai/sdk`](https://www.npmjs.com/package/@anthropic-ai/sdk)
-- Only if using `CLASSIFIER=local`: Python 3.10+ with `local-llm/requirements.txt` installed (see "Training your own local model" above)
+- Only if using `CLASSIFIER=local`: Python 3.10+, with either `local-llm/requirements.txt` (LoRA/Qwen) or `local-llm/scratch/requirements.txt` (from scratch) installed — see "Training your own local model" above
 
 > **Why pdf-parse v2?** The legacy v1.x line bundles 2017-era pdf.js builds
 > that leak global state on modern Node — after the first document, parses

@@ -102,10 +102,29 @@ npm test
   regex): unambiguous phrases like "Air Waybill" or "Tax Invoice" outweigh
   generic ones like "Consignee" or "PO No" that appear on several document
   types. Highest score wins; no hits → `Unknown`.
+  - Real Indian export/customs paperwork puts shipment fields (`Consignee`,
+    `Port of Loading`) and glossary blurbs (`P.O. - Purchase Order`) on
+    *every* document type, not just the one they nominally belong to — those
+    are weighted low (weak supporting evidence) so the phrases that actually
+    name the document ("Commercial Invoice", "Shipping Bill") win outright.
+  - `Proforma Invoice` / `Packing List` classify as `PO` — in many export
+    workflows the proforma invoice is the anchor document a purchase order
+    would otherwise be (referenced by the commercial invoice's own PO/
+    reference field), even though it's not literally titled "Purchase Order".
 - **Invoice number**: labels `Invoice Number`, `Invoice No.`, `Inv No`,
   `Inv #`, `Invoice#` followed by an alphanumeric ID (must contain a digit).
 - **PO number**: labels `Purchase Order`, `PO No`, `PO #`, `P.O. Number`,
-  `PO Ref` followed by an alphanumeric ID (must contain a digit).
+  `PO Ref`, `Reference (PXP)` followed by an alphanumeric ID.
+- **Fiscal-reference fallback**: when no label match is found, both
+  extractors fall back to the bare `PREFIX/YY-YY/NNN` reference format common
+  in Indian export docs (e.g. `EXP/25-26/409` for an export invoice,
+  `PXP/25-26/4` for a proforma/purchase reference) — needed because
+  multi-column customs forms (shipping-bill EDI printouts) flatten into
+  linear text where a value can land far from, or even before, its label.
+- **Short-capture guard**: any candidate identifier under 4 characters is
+  rejected and extraction keeps searching. Tabular forms often place a label
+  right next to an unrelated column number (e.g. "2.INVOICE NO 3.INVOICE
+  AMOUNT" reads as "INVOICE NO" → "3"), and this filters that out.
 - Identifiers are normalised to uppercase so `inv-2024/001` and
   `INV-2024/001` batch together.
 

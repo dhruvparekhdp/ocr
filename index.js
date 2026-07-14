@@ -49,22 +49,32 @@ export const DOC_TYPES = Object.freeze({
  * its text; the highest-scoring type wins. Weights let unambiguous phrases
  * ("Air Waybill", "Shipping Bill No") dominate generic ones ("Consignee",
  * "PO No") that often appear on several document types at once.
+ *
+ * Real-world Indian export/customs paperwork (commercial invoices, packing
+ * lists, shipping-bill EDI printouts) routinely carries shipment fields
+ * ("Consignee", "Port of Loading") and glossary blurbs ("P.O. - Purchase
+ * Order") on *every* document type, not just the one they nominally belong
+ * to — so those generic fields are weighted low (weak supporting evidence
+ * only) while the phrases that actually name the document type ("Commercial
+ * Invoice", "Shipping Bill") are weighted high enough to win outright.
  */
 const CLASSIFICATION_RULES = [
   {
     type: DOC_TYPES.PO,
     keywords: [
       { pattern: /\bpurchase\s+order\b/i, weight: 5 },
-      { pattern: /\bpo\s*(?:no|#)\b/i, weight: 3 },
-      { pattern: /\bp\.o\./i, weight: 3 },
+      { pattern: /\bproforma\s+invoice\b/i, weight: 6 }, // the PO-equivalent anchor doc in many export workflows
+      { pattern: /\bpacking\s+list\b/i, weight: 4 },
+      { pattern: /\bpo\s*(?:no|#)\b/i, weight: 2 },
+      { pattern: /\bp\.o\./i, weight: 2 },
       { pattern: /\border\s+date\b/i, weight: 2 },
     ],
   },
   {
     type: DOC_TYPES.INVOICE,
     keywords: [
-      { pattern: /\btax\s+invoice\b/i, weight: 5 },
-      { pattern: /\bcommercial\s+invoice\b/i, weight: 5 },
+      { pattern: /\btax\s+invoice\b/i, weight: 10 },
+      { pattern: /\bcommercial\s+invoice\b/i, weight: 10 },
       { pattern: /\binvoice\s+to\b/i, weight: 4 },
       { pattern: /\binv\s*(?:no|#)\b/i, weight: 3 },
       { pattern: /\bbill\s+to\b/i, weight: 2 },
@@ -75,12 +85,12 @@ const CLASSIFICATION_RULES = [
     type: DOC_TYPES.AWB_BL,
     keywords: [
       { pattern: /\bair\s*waybill\b/i, weight: 5 },
-      { pattern: /\bbill\s+of\s+lading\b/i, weight: 5 },
+      { pattern: /\bbill\s+of\s+lading\b/i, weight: 4 },
       { pattern: /\bawb\b/i, weight: 4 },
       { pattern: /\bb\/l\b/i, weight: 4 },
       { pattern: /\bshipper'?s\s+copy\b/i, weight: 3 },
-      { pattern: /\bconsignee\b/i, weight: 2 },
-      { pattern: /\bport\s+of\s+loading\b/i, weight: 2 },
+      { pattern: /\bconsignee\b/i, weight: 1 },
+      { pattern: /\bport\s+of\s+loading\b/i, weight: 1 },
     ],
   },
   {
@@ -90,6 +100,7 @@ const CLASSIFICATION_RULES = [
       { pattern: /\bsb\s*(?:no|#)\b/i, weight: 4 },
       { pattern: /\bexport\s+goods\b/i, weight: 3 },
       { pattern: /\bcustoms\s+copy\b/i, weight: 3 },
+      { pattern: /\blet\s+export\s+copy\b/i, weight: 3 },
       { pattern: /\bport\s+of\s+export\b/i, weight: 2 },
     ],
   },
@@ -102,20 +113,39 @@ const CLASSIFICATION_RULES = [
  * The value part accepts letters, digits, '-', '/', '_' and must contain at
  * least one digit (guards against capturing stray words such as "Date" that
  * follow a bare "Purchase Order" heading — enforced by the `(?=...\d)`
- * lookahead). Patterns are tried in order; the first match wins, so the most
- * explicit labels come first.
+ * lookahead). The separator between label and value allows whitespace and
+ * punctuation in any order (`[\s:.\-#]*`) since real forms print labels like
+ * "INV NO. : EXP/25-26/409" (space, then colon, then space) rather than the
+ * tidy "label:value" shape a stricter separator would require.
+ *
+ * Label-adjacent patterns are tried first for precision; the last pattern in
+ * each list is a label-free fallback recognising the `PREFIX/YY-YY/NNN`
+ * fiscal-year reference format used broadly in Indian export/customs
+ * paperwork (e.g. "EXP/25-26/409" for an export invoice, "PXP/25-26/4" for
+ * a proforma invoice / purchase reference). It exists because multi-column
+ * customs forms (shipping bills, EDI printouts) flatten into linear text
+ * where a value can land far from — or even before — its label, so
+ * label-adjacency matching alone misses it.
  */
 const ID_VALUE = /((?=[A-Z0-9\/\-_]*\d)[A-Z0-9][A-Z0-9\/\-_]*)/.source;
 
+/** Captured identifiers shorter than this are almost always a stray table/column number, not a real ID. */
+const MIN_ID_LENGTH = 4;
+
 const INVOICE_NUMBER_PATTERNS = [
-  new RegExp(String.raw`\binvoice\s*(?:number|no\.?|#)\s*[:.\-#]*\s*` + ID_VALUE, 'i'),
-  new RegExp(String.raw`\binv\.?\s*(?:no\.?|#)\s*[:.\-#]*\s*` + ID_VALUE, 'i'),
-  new RegExp(String.raw`\binvoice#\s*` + ID_VALUE, 'i'),
+  new RegExp(String.raw`\binvoice\s*(?:number|no\.?|#)\s*[\s:.\-#]*` + ID_VALUE, 'gi'),
+  new RegExp(String.raw`\binv\.?\s*(?:no\.?|#)\s*[\s:.\-#]*` + ID_VALUE, 'gi'),
+  new RegExp(String.raw`\binvoice#\s*` + ID_VALUE, 'gi'),
+  // Fallback: bare "EXP/25-26/409"-style export reference, no label needed.
+  /\b(EXP[A-Z]{0,3}\/\d{2,4}[-\/]\d{2,4}\/\d+)\b/gi,
 ];
 
 const PO_NUMBER_PATTERNS = [
-  new RegExp(String.raw`\bp\.?\s?o\.?\s*(?:number|no\.?|#|ref)\s*[:.\-#]*\s*` + ID_VALUE, 'i'),
-  new RegExp(String.raw`\bpurchase\s+order\s*(?:number|no\.?|#|ref)?\s*[:.\-#]*\s*` + ID_VALUE, 'i'),
+  new RegExp(String.raw`\bp\.?\s?o\.?\s*(?:number|no\.?|#|ref)\s*[\s:.\-#]*` + ID_VALUE, 'gi'),
+  new RegExp(String.raw`\bpurchase\s+order\s*(?:number|no\.?|#|ref)?\s*[\s:.\-#]*` + ID_VALUE, 'gi'),
+  new RegExp(String.raw`\breference\s*\(?\s*pxp\s*\)?\s*[\s:.\-#]*` + ID_VALUE, 'gi'),
+  // Fallback: bare "PXP/25-26/4"-style proforma/purchase reference, no label needed.
+  /\b((?:PXP|PI|PFI|PROF)[A-Z]{0,3}\/\d{2,4}[-\/]\d{2,4}\/\d+)\b/gi,
 ];
 
 // ---------------------------------------------------------------------------
@@ -134,16 +164,25 @@ const normalizeId = (value) =>
 
 /**
  * Runs an ordered list of extraction patterns against the text and returns
- * the first captured identifier.
+ * the first captured identifier that's plausibly real.
+ *
+ * Tries every occurrence of a pattern (not just the first) before moving on
+ * to the next pattern, and skips candidates shorter than {@link MIN_ID_LENGTH}.
+ * This matters on multi-column customs forms, where a label's *nearest*
+ * neighbour in the linearised text is often another column header's leading
+ * number (e.g. "2.INVOICE NO 3.INVOICE AMOUNT" reads as "INVOICE NO" → "3"),
+ * not the real value — so the first match for a pattern isn't always usable.
  *
  * @param {string} text     Raw PDF text.
- * @param {RegExp[]} patterns Ordered extraction patterns.
+ * @param {RegExp[]} patterns Ordered extraction patterns (each with the 'g' flag).
  * @returns {string|null}
  */
 const extractIdentifier = (text, patterns) => {
   for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match?.[1]) return normalizeId(match[1]);
+    for (const match of text.matchAll(pattern)) {
+      const candidate = normalizeId(match[1]);
+      if (candidate && candidate.length >= MIN_ID_LENGTH) return candidate;
+    }
   }
   return null;
 };

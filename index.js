@@ -25,6 +25,15 @@ import process from 'node:process';
 // after the first one fail with "bad XRef entry" — so v2 is required here.
 import { PDFParse } from 'pdf-parse';
 
+import { DOC_TYPES } from './docTypes.js';
+
+// Imported lazily-invoked, not eagerly: constructing the Anthropic client
+// requires credentials, and this module must still work (via the regex
+// fallback) when none are configured. See resolveAnalyzer() below.
+import { classifyWithLLM } from './llmClassifier.js';
+
+export { DOC_TYPES };
+
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
@@ -32,14 +41,11 @@ import { PDFParse } from 'pdf-parse';
 /** Maximum number of PDFs parsed concurrently. */
 const CONCURRENCY_LIMIT = 8;
 
-/** Document type constants — used consistently across the pipeline. */
-export const DOC_TYPES = Object.freeze({
-  PO: 'PO',
-  INVOICE: 'Invoice',
-  AWB_BL: 'AWB_BL',
-  SHIPPING_BILL: 'Shipping Bill',
-  UNKNOWN: 'Unknown',
-});
+/**
+ * LLM concurrency is deliberately lower than PDF-parsing concurrency — it's
+ * bounded by API rate limits and cost, not local CPU/IO.
+ */
+const LLM_CONCURRENCY_LIMIT = 5;
 
 /**
  * Classification keyword table.
@@ -226,6 +232,66 @@ export const analyzeText = (rawText) => {
   return { documentType, invoiceNumber, poNumber };
 };
 
+/**
+ * Picks which analyzer backs a single classification run and how many can
+ * run concurrently. Resolved once per run (not per-document) so a batch
+ * never mixes LLM and regex classifications, which would make results
+ * inconsistent within the same report.
+ *
+ * - `CLASSIFIER=llm`   forces the LLM path (errors per-document if the API
+ *   call fails — e.g. missing/invalid credentials — same as any other
+ *   per-file failure).
+ * - `CLASSIFIER=regex` forces the keyword/regex path, regardless of
+ *   whether Anthropic credentials are configured. Useful for a fast, free,
+ *   fully offline run, or for comparing the two approaches.
+ * - Unset (default): LLM if Anthropic credentials are present, else regex
+ *   with a one-time warning. The regex path exists as a fallback, not the
+ *   recommended default — see README for why keyword matching alone is
+ *   unreliable on real-world document variety.
+ *
+ * Memoized for the process lifetime so the fallback warning prints once,
+ * even though both the startup banner and the actual run call this.
+ *
+ * @returns {{ analyze: (rawText: string) => Promise<object>, concurrency: number, mode: 'llm'|'regex' }}
+ */
+let cachedAnalyzer = null;
+const resolveAnalyzer = () => {
+  if (cachedAnalyzer) return cachedAnalyzer;
+
+  const forced = process.env.CLASSIFIER?.toLowerCase();
+  if (forced === 'regex') {
+    cachedAnalyzer = { analyze: async (rawText) => analyzeText(rawText), concurrency: CONCURRENCY_LIMIT, mode: 'regex' };
+    return cachedAnalyzer;
+  }
+  if (forced === 'llm') {
+    cachedAnalyzer = { analyze: classifyWithLLM, concurrency: LLM_CONCURRENCY_LIMIT, mode: 'llm' };
+    return cachedAnalyzer;
+  }
+
+  const hasCredentials = Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
+  if (!hasCredentials) {
+    console.warn(
+      '⚠ No Anthropic credentials found (ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN unset) — ' +
+        'falling back to regex-based classification. Set an API key (or run ' +
+        '`ant auth login`) to use the LLM classifier, which generalises far better ' +
+        'across real-world document variety. Set CLASSIFIER=regex to silence this warning.',
+    );
+    cachedAnalyzer = { analyze: async (rawText) => analyzeText(rawText), concurrency: CONCURRENCY_LIMIT, mode: 'regex' };
+    return cachedAnalyzer;
+  }
+  cachedAnalyzer = { analyze: classifyWithLLM, concurrency: LLM_CONCURRENCY_LIMIT, mode: 'llm' };
+  return cachedAnalyzer;
+};
+
+/**
+ * Reports which classifier a run would use, without running anything —
+ * used by the CLI/server startup banner so users know what they'll get
+ * before any PDFs are processed.
+ *
+ * @returns {'llm'|'regex'}
+ */
+export const getAnalyzerMode = () => resolveAnalyzer().mode;
+
 // ---------------------------------------------------------------------------
 // PDF ingestion
 // ---------------------------------------------------------------------------
@@ -301,18 +367,20 @@ export const processDirectory = async (dirPath) => {
     console.warn(`⚠ No PDF files found in "${dirPath}".`);
   }
 
+  const { analyze, concurrency } = resolveAnalyzer();
+
   const outcomes = await mapWithConcurrency(
     pdfFiles,
     async (fileName) => {
       const filePath = path.join(dirPath, fileName);
       try {
         const rawText = await extractTextFromPdf(filePath);
-        return { ok: true, doc: { fileName, ...analyzeText(rawText) } };
+        return { ok: true, doc: { fileName, ...(await analyze(rawText)) } };
       } catch (error) {
         return { ok: false, error: { fileName, reason: error.message } };
       }
     },
-    CONCURRENCY_LIMIT,
+    concurrency,
   );
 
   return {
@@ -330,17 +398,19 @@ export const processDirectory = async (dirPath) => {
  * @returns {Promise<{ analyzedDocs: Array<object>, errors: Array<object> }>}
  */
 export const processBuffers = async (files) => {
+  const { analyze, concurrency } = resolveAnalyzer();
+
   const outcomes = await mapWithConcurrency(
     files,
     async ({ fileName, buffer }) => {
       try {
         const rawText = await extractTextFromBuffer(buffer);
-        return { ok: true, doc: { fileName, ...analyzeText(rawText) } };
+        return { ok: true, doc: { fileName, ...(await analyze(rawText)) } };
       } catch (error) {
         return { ok: false, error: { fileName, reason: error.message } };
       }
     },
-    CONCURRENCY_LIMIT,
+    concurrency,
   );
 
   return {

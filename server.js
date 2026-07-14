@@ -17,7 +17,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 
-import { processBuffers, segregateIntoBatches } from './index.js';
+import { processBuffers, segregateIntoBatches, getAnalyzerMode } from './index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -82,4 +82,5 @@ app.use((err, _req, res, _next) => {
 const port = Number(process.argv[2] ?? process.env.PORT ?? 3000);
 app.listen(port, () => {
   console.log(`📄 PDF Batch Classifier running at http://localhost:${port}`);
+  console.log(`   Classifier: ${getAnalyzerMode() === 'llm' ? 'Claude (LLM)' : 'keyword/regex fallback'}`);
 });

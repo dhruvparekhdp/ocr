@@ -1,8 +1,0 @@
-# Deliberately minimal — no transformers, no peft, no accelerate, no
-# bitsandbytes, no Hugging Face Hub model downloads. Just PyTorch (the model
-# is defined from scratch in model.py) and the standalone tokenizers library
-# (for training your own BPE vocab).
-torch>=2.2
-tokenizers>=0.20
-fastapi>=0.115
-uvicorn[standard]>=0.30

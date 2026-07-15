@@ -1,10 +1,11 @@
 /**
  * ============================================================================
- * PDF Batch Classifier — Web Upload Server
+ * Document Classifier — Web Upload Server
  * ============================================================================
  * Serves a single-page bulk uploader (public/index.html) and a POST endpoint
- * that runs the existing classification/batching pipeline (index.js) over
- * the uploaded PDFs entirely in memory — nothing is written to disk.
+ * that runs the classification/extraction/batching pipeline (index.js) over
+ * the uploaded PDFs entirely in memory — nothing is written to disk. Scanned
+ * PDFs are OCR'd offline (no network); nothing leaves the machine.
  *
  * Usage:
  *   node server.js [port]   (default port 3000, or $PORT)
@@ -17,7 +18,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 
-import { processBuffers, segregateIntoBatches, getAnalyzerMode } from './index.js';
+import { processBuffers, segregateIntoBatches } from './index.js';
+import { terminateOcr } from './ocr.js';
 import { getBranding, getDocumentTypeNames, getAllFieldNames } from './schema.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -69,6 +71,7 @@ app.post('/api/classify', upload.array('documents', MAX_FILES), async (req, res)
       summary: {
         totalPdfs: analyzedDocs.length + errors.length,
         analyzed: analyzedDocs.length,
+        ocrUsed: analyzedDocs.filter((d) => d.source === 'ocr').length,
         failed: errors.length,
         batches: Object.keys(batches).length,
         unbatchedGroups: Object.keys(unbatched).length,
@@ -92,8 +95,16 @@ app.use((err, _req, res, _next) => {
 });
 
 const port = Number(process.argv[2] ?? process.env.PORT ?? 3000);
-app.listen(port, () => {
-  console.log(`📄 PDF Batch Classifier running at http://localhost:${port}`);
-  const modeLabels = { llm: 'Claude (LLM)', local: 'local fine-tuned model', regex: 'keyword/regex fallback' };
-  console.log(`   Classifier: ${modeLabels[getAnalyzerMode()]}`);
+const server = app.listen(port, () => {
+  console.log(`📄 Document Classifier running at http://localhost:${port}`);
+  console.log('   Engine: local heuristics + offline OCR (no cloud, no LLM)');
 });
+
+// Release the OCR worker on shutdown so the process exits cleanly.
+const shutdown = async () => {
+  server.close();
+  await terminateOcr();
+  process.exit(0);
+};
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);

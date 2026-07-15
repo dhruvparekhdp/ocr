@@ -1,7 +1,7 @@
 {
-  "name": "pdf-batch-classifier",
-  "version": "1.0.0",
-  "description": "Parses text-based PDFs, classifies them (PO / Invoice / AWB_BL / Shipping Bill), extracts Invoice & PO numbers, and segregates related documents into batches.",
+  "name": "document-classifier",
+  "version": "2.0.0",
+  "description": "Self-contained document classifier: PDF-to-text (with offline OCR fallback for scanned PDFs), from-scratch heuristic field extraction, and batching. No cloud, no LLM.",
   "type": "module",
   "main": "index.js",
   "engines": {
@@ -12,20 +12,18 @@
     "classify": "node index.js",
     "web": "node server.js",
     "generate-samples": "node scripts/generate-samples.js",
-    "test": "node scripts/generate-samples.js && node index.js ./sample_pdfs",
-    "local:extract-text": "node scripts/extract-text.js"
+    "test": "node scripts/generate-samples.js && node index.js ./sample_pdfs"
   },
   "keywords": [
     "pdf",
     "ocr",
+    "tesseract",
     "classification",
     "invoice",
-    "purchase-order",
     "document-processing"
   ],
   "license": "MIT",
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.111.0",
     "@tesseract.js-data/eng": "^1.0.0",
     "express": "^5.2.1",
     "multer": "^2.2.0",
@@ -33,6 +31,7 @@
     "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
+    "@napi-rs/canvas": "^0.1.80",
     "pdfkit": "^0.15.2"
   }
 }

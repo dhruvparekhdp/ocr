@@ -61,16 +61,29 @@ const getWorker = () => {
   return workerPromise;
 };
 
+// A single tesseract worker processes one job at a time; if the document
+// pipeline runs several PDFs concurrently, their OCR calls would otherwise
+// hit the same worker at once and race. This promise chain serializes every
+// recognize() call so they queue cleanly behind one another.
+let recognizeChain = Promise.resolve();
+
 /**
- * Runs OCR on a single raster image buffer (PNG/JPEG).
+ * Runs OCR on a single raster image buffer (PNG/JPEG). Calls are serialized
+ * across the process — safe to call concurrently, they simply queue.
  *
  * @param {Buffer} imageBuffer
  * @returns {Promise<string>} Recognized text.
  */
-export const ocrImage = async (imageBuffer) => {
-  const worker = await getWorker();
-  const { data } = await worker.recognize(imageBuffer);
-  return data.text;
+export const ocrImage = (imageBuffer) => {
+  const run = async () => {
+    const worker = await getWorker();
+    const { data } = await worker.recognize(imageBuffer);
+    return data.text;
+  };
+  // Attach to the chain, but don't let one failure poison later calls.
+  const result = recognizeChain.then(run, run);
+  recognizeChain = result.catch(() => {});
+  return result;
 };
 
 /**

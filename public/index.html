@@ -272,8 +272,15 @@
     return parts.length ? `<span class="fields">${parts.join(' · ')}</span>` : '';
   };
 
+  // An "OCR" tag on documents whose text came from image OCR rather than an
+  // embedded text layer — a cue that their extracted values may be noisier.
+  const sourceTag = (doc) =>
+    doc.source === 'ocr'
+      ? '<span class="type-badge" style="background:#3a2d16;color:#f0c674" title="Text obtained via OCR">OCR</span>'
+      : '';
+
   const docChip = (doc) =>
-    `<span class="doc-chip">${typeBadge(doc.documentType)} ${escapeHtml(doc.fileName)} ${fieldsSummary(doc.fields)}</span>`;
+    `<span class="doc-chip">${typeBadge(doc.documentType)} ${sourceTag(doc)} ${escapeHtml(doc.fileName)} ${fieldsSummary(doc.fields)}</span>`;
 
   const formatBytes = (bytes) => {
     if (bytes < 1024) return `${bytes} B`;
@@ -403,6 +410,7 @@
     html += `<div class="summary-grid">
       <div class="stat"><div class="value">${summary.totalPdfs}</div><div class="label">Total documents</div></div>
       <div class="stat ok"><div class="value">${summary.analyzed}</div><div class="label">Analyzed</div></div>
+      <div class="stat"><div class="value">${summary.ocrUsed ?? 0}</div><div class="label">Via OCR</div></div>
       <div class="stat ok"><div class="value">${summary.batches}</div><div class="label">Batches</div></div>
       <div class="stat warn"><div class="value">${summary.unbatchedGroups}</div><div class="label">Unbatched groups</div></div>
       <div class="stat ${summary.failed ? 'error' : ''}"><div class="value">${summary.failed}</div><div class="label">Failed</div></div>

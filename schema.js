@@ -5,16 +5,12 @@
  * A single JSON file (config/schema.json by default, override with
  * SCHEMA_PATH) defines everything a corporate deployment needs to be
  * different from another: product branding, which document types exist, and
- * which fields to extract from each. Every backend (Claude, regex fallback,
- * batching) reads from this one place, so onboarding a new client — or
- * adding "Transaction Record" alongside "Invoice" — is a config file edit,
- * not a code change.
- *
- * The local fine-tuned model backends (local-llm/) also read this same file
- * (their Python side loads it independently) — but for them, a schema change
- * requires retraining, since document types/fields are baked into a trained
- * classification head and tag set. Only the Claude-based backend adapts to a
- * schema change instantly, with no retraining. See README.
+ * which fields to extract from each. Classification, extraction, batching,
+ * and the web UI all read from this one place, so onboarding a new client —
+ * or adding "Transaction Record" alongside "Invoice" — is a config file
+ * edit, not a code change. (Adding a genuinely new *kind* of extractor still
+ * means a small function in extractors.js, referenced by the field's
+ * `extractor` name — see README.)
  * ============================================================================
  */
 

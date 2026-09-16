@@ -14,6 +14,11 @@ it, what's the address, the date, the amount, and the document/reference
 number* — and to be honest about where those heuristics stop working (see
 [Gaps and limitations](#gaps-and-limitations)).
 
+For implementation detail beyond this README, see `docs/ARCHITECTURE.md`
+(how the system fits together), `docs/DECISIONS.md` (why it's built this
+way, including approaches tried and rejected), and `docs/HISTORY.md` (how it
+got here — this project went through several full pivots).
+
 ## Pipeline
 
 ```
@@ -54,6 +59,27 @@ library, on purpose: running two independent bundled builds of pdfjs in one
 process corrupts pdfjs global state and the second one throws. Using
 `pdf-parse` for both text and image rendering avoids that (and keeps the
 dependency list small).
+
+Before OCR, every page image goes through `imagePreprocess.js`:
+
+1. **Upscale** if the render is small (below ~1500px wide). Character height
+   in pixels is the single biggest lever on tesseract's accuracy; tested
+   against genuinely tiny text (a 7px font), this alone took OCR from
+   returning nothing to reading nearly everything correctly.
+2. **Grayscale.**
+3. **Denoise with a 3x3 median filter, then binarize with Otsu's method.**
+   Otsu picks the black/white cutoff per-image by maximizing between-class
+   variance, so it adapts to each page's own contrast instead of using a
+   fixed threshold. The median filter runs first because thresholding alone
+   is not robust to speckle noise — tested against a deliberately noisy
+   image, Otsu on its own turned salt-and-pepper speckle into confident but
+   wrong garbage text, worse than tesseract's own honest empty result on the
+   same unprocessed image. Median-then-Otsu is the standard pairing for
+   exactly that reason.
+
+This is a real, tested improvement for genuinely low-resolution or low-detail
+scans. It is not a fix for every kind of bad scan — see "OCR is only as good
+as the scan" below.
 
 ## What it extracts
 
@@ -151,6 +177,7 @@ npm test   # generates sample PDFs (including one scanned/OCR PDF) and runs the 
 | `schema.js` | Loads/validates the schema; exports getters used everywhere else. |
 | `pdfIngest.js` | PDF → text, with the offline-OCR fallback for scanned PDFs. Reports `text` vs `ocr`. |
 | `ocr.js` | Offline tesseract.js worker (local engine + language data); serialized so concurrent calls queue safely. |
+| `imagePreprocess.js` | Pre-OCR image cleanup: conditional upscale, grayscale, median denoise, Otsu binarization. |
 | `extractors.js` | The from-scratch field heuristics — one function per `extractor` type. |
 | `analyze.js` | Classify + extract: text → `{ documentType, fields }`. |
 | `index.js` | Orchestration: folder/buffer processing with bounded concurrency, union-find batching, CLI entry point. |
@@ -191,10 +218,18 @@ doesn't. In rough priority order:
   domain will need that tuning.
 
 **OCR is only as good as the scan.**
-- Accuracy depends on scan quality, resolution, skew, and fonts. Low-DPI,
-  photographed, rotated, or handwritten documents degrade badly. There is no
-  deskew/denoise/rotation-correction preprocessing yet — that's the highest-
-  value OCR improvement to add next.
+- `imagePreprocess.js` (upscale + median denoise + Otsu binarization, see
+  above) measurably helps low-resolution and low-detail scans. It does
+  **not** fix everything: it has no answer for **skew** (rotated pages —
+  tesseract degrades badly past a few degrees of rotation, and a naive
+  skew-angle estimate can make it worse by rotating text further off-axis,
+  so this was deliberately left out rather than shipped half-verified), and
+  on very heavy, non-scan-like noise it did not clearly help in testing —
+  synthetic per-pixel static isn't a faithful model of real scan
+  degradation, and a 3x3 median filter tuned against one adversarial test
+  case is not a substitute for a properly evaluated denoising pipeline.
+  Handwritten documents are out of scope regardless of preprocessing —
+  tesseract's model here is trained for printed text.
 - **English only.** Only the English language data is vendored. Other
   languages (or multilingual documents) need the matching
   `@tesseract.js-data/<lang>` package and a small change to `ocr.js`.

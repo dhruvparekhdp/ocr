@@ -6,8 +6,9 @@
  *
  *   1. Text-based PDF  → pdf-parse pulls the embedded text directly (fast).
  *   2. Scanned / image PDF → pdf-parse yields (almost) nothing, so each page
- *      is rasterized (pdf-parse's own getScreenshot) and run through offline
- *      OCR (ocr.js / tesseract.js).
+ *      is rasterized (pdf-parse's own getScreenshot), preprocessed
+ *      (imagePreprocess.js — upscale/denoise/binarize), and run through
+ *      offline OCR (ocr.js / tesseract.js).
  *
  * Both text extraction and page rasterization go through the SAME pdf-parse
  * instance (one bundled pdfjs). An earlier design rendered pages with a
@@ -22,6 +23,8 @@
  */
 
 import { PDFParse } from 'pdf-parse';
+
+import { preprocessForOcr } from './imagePreprocess.js';
 
 import { ocrImage } from './ocr.js';
 
@@ -49,8 +52,10 @@ const ocrAllPages = async (parser) => {
   const { pages } = await parser.getScreenshot({ scale: OCR_RENDER_SCALE });
   const pageTexts = [];
   for (const page of pages) {
-    // page.data is a Uint8Array of PNG bytes; tesseract accepts a Buffer.
-    const text = await ocrImage(Buffer.from(page.data));
+    // page.data is a Uint8Array of PNG bytes; preprocess (upscale/denoise/
+    // binarize — see imagePreprocess.js) before handing it to tesseract.
+    const preprocessed = await preprocessForOcr(Buffer.from(page.data));
+    const text = await ocrImage(preprocessed);
     pageTexts.push(text);
   }
   return pageTexts.join('\n\n');

@@ -9,8 +9,14 @@ requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.20.0",
     "fastapi>=0.141.1",
+    "onnxruntime==1.23.2 ; platform_machine == 'x86_64' and sys_platform == 'darwin'",
+    "onnxruntime>=1.23.2 ; platform_machine != 'x86_64' or sys_platform != 'darwin'",
+    "openpyxl>=3.1.5",
+    "pillow>=12.3.0",
     "pydantic-settings>=2.15.0",
+    "pypdfium2>=5.13.0",
     "python-multipart>=0.0.32",
+    "rapidocr>=3.9.2",
     "sqlalchemy>=2",
     "uvicorn[standard]>=0.53.0",
 ]
@@ -18,6 +24,7 @@ dependencies = [
 [project.scripts]
 docai-admin = "docai.cli:main"
 docai-eval = "docai.evaluation:main"
+docai-worker = "docai.worker:main"
 
 [build-system]
 requires = ["uv_build>=0.12.15,<0.13.0"]
@@ -27,6 +34,7 @@ build-backend = "uv_build"
 dev = [
     "httpx>=0.28.1",
     "pytest>=9.1.1",
+    "reportlab>=5.0.1",
     "ruff>=0.16.7",
 ]
 

@@ -28,7 +28,18 @@ def blob_path(storage_dir: Path, tenant_id: str, sha256: str) -> Path:
     return storage_dir / tenant_id / sha256[:2] / sha256
 
 
-def _sniff(path: Path, filename: str) -> tuple[str, DocumentKind]:
+def parsed_path(storage_dir: Path, tenant_id: str, document_id: str) -> Path:
+    return storage_dir / tenant_id / "parsed" / f"{document_id}.json"
+
+
+def write_atomic(path: Path, data: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text(data)
+    tmp.replace(path)
+
+
+def sniff_file(path: Path, filename: str) -> tuple[str, DocumentKind]:
     with path.open("rb") as f:
         head = f.read(4096)
 
@@ -76,7 +87,7 @@ def store_upload(stream: BinaryIO, filename: str, storage_dir: Path, tenant_id: 
         if size == 0:
             raise UploadRejected(f"{filename}: file is empty")
 
-        mime_type, kind = _sniff(tmp, filename)
+        mime_type, kind = sniff_file(tmp, filename)
         sha256 = digest.hexdigest()
         final = blob_path(storage_dir, tenant_id, sha256)
         final.parent.mkdir(parents=True, exist_ok=True)

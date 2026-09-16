@@ -6,8 +6,101 @@ file is to stop a future session (human or Claude) from re-litigating a
 question that was already answered, or re-trying something that was already
 tried and found wanting.
 
-Newest decisions first. Sections marked **Superseded** or **Legacy (Node)**
-are kept for context; they no longer describe the current system.
+Newest decisions first. Sections marked **Revised**, **Superseded** or
+**Legacy (Node)** are kept for context. Old context is never deleted directly
+(owner's rule, 2026-09-16); conflicts go in "Open conflicts to plan".
+
+## Open conflicts to plan (raised 2026-09-16, awaiting owner decisions)
+
+Integrating the legacy Node pipeline into the Python product surfaced these.
+Each has a proposal; none is implemented until agreed.
+
+1. **Offline-mode extraction vs schema v2.** Legacy heuristics need per-type
+   `keywords` and per-field `labels` + `extractor`; schema v2 dropped them.
+   *Proposal:* add them back to v2 as optional keys used only by offline mode;
+   port `extractors.js`/`analyze.js` to `docai/extract/heuristic.py`.
+2. **Field names v1 → v2.** Legacy `companyName`, `address`, `date`,
+   `amount` vs v2 `issuerName`, `issuerAddress`, `documentDate`,
+   `totalAmount`. *Proposal:* use v2 names; heuristics fill the v2 fields.
+3. **OCR engine.** Legacy tesseract.js + upscale/median/Otsu preprocessing vs
+   RapidOCR now (P1). *Proposal:* RapidOCR only; port median+Otsu as an
+   optional preprocessing step and keep it only if the eval set shows a gain
+   (upscaling was already re-measured for RapidOCR — see P1 decisions).
+   Tesseract would need a system binary and was not measured better.
+4. **Web UI.** Legacy `public/index.html` bulk-upload page vs a new React UI
+   planned for P2. *Proposal:* port the legacy page onto the new API now
+   (upload → poll status → show fields/OCR badges); replace it later.
+5. **Batching.** Legacy union-find over `isBatchKey` fields. *Proposal:* port
+   as-is in P2; it's independent of which mode produced the fields.
+6. **Mode selection.** *Proposal:* per-tenant `mode`: `offline` (never calls
+   the network), `llm`, or `hybrid` (offline first, LLM for missing or
+   low-confidence fields). Default `offline` until a tenant opts in.
+7. **Training data rights.** Distilling our own model needs LLM
+   inputs/outputs from real client documents. *Proposal:* per-tenant opt-in
+   `allow_training` flag; only opted-in tenants' data is stored for training.
+   Prefer teacher models whose licence allows training on outputs (e.g.
+   gpt-oss, Apache-2.0); check Llama-licence terms and Groq's terms before
+   using others.
+8. **Legacy Node app lifetime.** *Proposal:* keep `legacy/` runnable until
+   Python reaches feature parity, then retire it with a `HISTORY.md` entry
+   (docs stay).
+
+## Dual mode: offline (no LLM) and LLM, both kept (2026-09-16)
+
+**Decision:** The product has two first-class processing modes. **Offline**:
+local OCR + rule-based classification/extraction, zero network — the earlier
+project's approach, to be ported from `legacy/`. **LLM**: Groq-hosted models
+for extraction and reasoning. The owner's own model is trained by distilling
+from online model APIs (the only accessible option without GPU hardware);
+when it's good enough it replaces the API and runs offline.
+
+**Why:** Owner's explicit instruction, refining the earlier "Product
+direction" entry the same day. Some clients will require that nothing leaves
+their machine; others want the accuracy of LLMs. Keeping both also gives a
+baseline to measure the LLM against.
+
+## P1 ingestion decisions (2026-09-16)
+
+- **PDF library: pypdfium2** for both text (positioned runs via text rects)
+  and rendering. PyMuPDF excluded (AGPL). pdfplumber avoided: its
+  `cryptography` dependency has no x86_64 macOS wheels after 48.0.1 and
+  pinning an old crypto library is worse than not needing it.
+- **OCR engine: RapidOCR** (PP-OCR models on ONNX Runtime, Apache-2.0, models
+  bundled in the wheel — no runtime download). ~11 s cold load, ~1 s per page
+  on the Intel i5. `onnxruntime` is pinned to 1.23.2 **only** on x86_64 macOS
+  (last wheel for that platform); other platforms take the latest.
+- **Docling deferred:** it needs PyTorch, whose last x86_64 macOS wheel is
+  2.2.2. It can run on a Linux server later; revisit if tables need it.
+- **Upscaling re-measured for RapidOCR** (synthetic invoice text, similarity
+  to ground truth): clean 7 px text 0.96 raw / 0.95 at 2x / 0.91 at 3x; noisy
+  7 px 0.67 raw / 0.80 at 2x; 12–16 px unchanged or slightly worse. So: 2x
+  only when the image's longest side is under 1000 px, never 3x. This differs
+  from the tesseract finding (upscaling was the biggest win there) because
+  RapidOCR's detector resizes internally.
+- **Render DPI fixed at 200.** Measured 150/200/250/300 on a scanned and a
+  mixed PDF: identical OCR output, so no adaptive DPI until an eval case
+  needs it. (An earlier "DPI-dependent" misread was caused by a test fixture
+  that stretched glyphs, not by DPI.)
+- **Per-page routing:** a page's text layer is used if it has ≥20 visible
+  characters and ≤10% replacement/control characters; otherwise the page is
+  OCR'd. On text pages, embedded images covering ≥2% of the page with <20
+  characters of text over them are OCR'd too (max 10 per page) — this
+  catches pasted receipts and logo text while skipping searchable scans
+  that already have an invisible text layer.
+- **Rows, not tables:** P1 outputs visual rows with gap-preserving spacing
+  plus normalised bboxes, not reconstructed tables. Table structure is left
+  to extraction (P2) where the LLM reads the layout text; revisit with a
+  table model if the eval set shows table fields failing.
+- **Spreadsheets:** openpyxl loads each workbook twice (cached values +
+  formulas) so library-generated files without cached values still show the
+  formula; leading empty rows are kept so row numbers match Excel; CSV values
+  stay strings (no type guessing — protects IDs like `007` and locale
+  numbers like `1.234,50`).
+- **Queue = documents table**, polled by `docai-worker` (or a thread in the
+  API with `EMBEDDED_WORKER=true` for single-process free hosting). Claims
+  are compare-and-set updates, safe across processes on SQLite and Postgres.
+  Unexpected errors retry immediately up to 3 attempts — fine for local
+  deterministic parsing; add backoff when network calls (Groq) are involved.
 
 ## Product direction: sellable white-label analyser, Groq now, own model later (2026-09-16)
 
@@ -30,9 +123,9 @@ needs data and compute this project doesn't have. "Own model" means
 fine-tuning a small, commercially licensed open-weight model on reviewed
 outputs, on free cloud notebooks (the dev Mac cannot train).
 
-**Consequence:** the old "no cloud / no LLM / no model" rule below is
-superseded, and the Docling "open question" is answered: local ML models are
-in scope.
+**Consequence:** the Docling "open question" is answered: local ML models
+are in scope. *Refined the same day by "Dual mode" above: the no-LLM offline
+approach is kept as a first-class mode, not replaced.*
 
 ## Python backend replaces the Node prototype (2026-09-16)
 
@@ -106,9 +199,10 @@ migrations portable to Postgres. A `UTCDateTime` column type exists because
 SQLite drops tzinfo, which made API timestamps inconsistent (found while
 smoke-testing a live server).
 
-## Superseded: No cloud, no LLM, no trained ML model
+## Revised: No cloud, no LLM, no trained ML model
 
-*Superseded on 2026-09-16 by "Product direction" above. Kept as context.*
+*Revised on 2026-09-16 by "Dual mode" above: this remains the behaviour of
+the offline mode, but it is no longer the only mode. Kept as context.*
 
 **Decision:** The pipeline uses zero API calls and zero machine-learning
 models of any kind. Classification is keyword scoring; extraction is regex

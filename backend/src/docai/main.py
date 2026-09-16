@@ -1,24 +1,49 @@
+import logging
+import threading
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import PurePath
 from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Security, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from docai.db import Document, DocumentKind, DocumentStatus, Tenant, get_session
 from docai.doc_schema import Branding, DocSchema
+from docai.ingest import ParsedDocument
 from docai.settings import Settings, get_settings
-from docai.storage import UploadRejected, blob_path, store_upload
+from docai.storage import UploadRejected, blob_path, parsed_path, store_upload
 from docai.tenants import find_by_api_key, tenant_schema
 
 MAX_FILES_PER_REQUEST = 200
 
-app = FastAPI(title="DocAI", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    # Single-process deployments (free hosting) can run the parser in the API process instead of docai-worker.
+    stop = threading.Event()
+    thread = None
+    if get_settings().embedded_worker:
+        from docai import worker
+
+        logging.getLogger("docai").setLevel(logging.INFO)
+        if not logging.getLogger().handlers:
+            logging.basicConfig(format="%(levelname)s:     %(name)s: %(message)s")
+
+        thread = threading.Thread(target=worker.run, kwargs={"stop": stop}, name="docai-worker", daemon=True)
+        thread.start()
+    yield
+    stop.set()
+    if thread:
+        thread.join(timeout=30)
+
+
+app = FastAPI(title="DocAI", version="0.1.0", lifespan=lifespan)
 
 SessionDep = Annotated[Session, Depends(get_session)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
@@ -46,6 +71,9 @@ class DocumentOut(BaseModel):
     size_bytes: int
     status: DocumentStatus
     created_at: datetime
+    error: str | None
+    page_count: int | None
+    parsed_at: datetime | None
 
 
 class UploadResult(BaseModel):
@@ -155,3 +183,36 @@ def get_document_file(document_id: str, tenant: TenantDep, session: SessionDep, 
     return FileResponse(
         blob_path(settings.storage_dir, tenant.id, doc.sha256), media_type=doc.mime_type, filename=doc.filename
     )
+
+
+@app.post("/api/documents/{document_id}/reparse", status_code=202)
+def reparse_document(document_id: str, tenant: TenantDep, session: SessionDep) -> DocumentOut:
+    doc = _get_or_404(session, tenant, document_id)
+    if doc.status in (DocumentStatus.QUEUED, DocumentStatus.PROCESSING):
+        raise HTTPException(409, f"document is already {doc.status}")
+    session.execute(
+        update(Document)
+        .where(Document.id == doc.id, Document.status == doc.status)
+        .values(status=DocumentStatus.QUEUED, attempts=0, error=None, locked_at=None)
+    )
+    session.commit()
+    session.refresh(doc)
+    return doc
+
+
+@app.get("/api/documents/{document_id}/parsed", response_model=None)
+def get_parsed_document(
+    document_id: str,
+    tenant: TenantDep,
+    session: SessionDep,
+    settings: SettingsDep,
+    format: Literal["json", "text"] = "json",
+) -> ParsedDocument | PlainTextResponse:
+    doc = _get_or_404(session, tenant, document_id)
+    path = parsed_path(settings.storage_dir, tenant.id, doc.id)
+    if doc.status != DocumentStatus.PARSED or not path.exists():
+        raise HTTPException(409, f"document is {doc.status}" + (f": {doc.error}" if doc.error else ""))
+    parsed = ParsedDocument.model_validate_json(path.read_text())
+    if format == "text":
+        return PlainTextResponse(parsed.to_text())
+    return parsed

@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     storage_dir: Path = REPO_ROOT / "data" / "files"
     schema_path: Path = REPO_ROOT / "config" / "schema.json"
     max_upload_mb: int = 50
+    max_pages: int = 300
+    embedded_worker: bool = False
     groq_api_key: str | None = None
 
 

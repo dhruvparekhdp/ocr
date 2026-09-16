@@ -145,3 +145,20 @@ In parallel, another session committed step 6 (Node OCR preprocessing) and
 step 7 (these docs) to `origin/main`; that was merged on top of P0, with the
 Node changes relocated into `legacy/` and these docs updated to the new
 direction rather than discarded.
+
+## 10. P1 ingestion, and the owner's "keep both modes" instruction (2026-09-16)
+
+P1 added `backend/src/docai/ingest/`: PDF (per-page text layer vs OCR, with
+OCR of embedded images), images (EXIF rotation, multi-page TIFF), XLSX
+(values, formulas, merged cells, hidden sheets, embedded images OCR'd) and
+CSV, all into one positioned-lines document model, processed by a
+database-polled worker. Library choices were constrained by the Intel Mac
+(no recent PyTorch, onnxruntime or cryptography wheels) — see DECISIONS "P1
+ingestion decisions".
+
+During P1 the owner clarified: don't just shelve the old Node pipeline —
+integrate it; keep **both** no-LLM/offline and LLM/cloud modes; train the
+own model from online model APIs; and never delete old context directly.
+Docs that had been rewritten wholesale earlier the same day (`CLAUDE.md`,
+`docs/ARCHITECTURE.md`) had their original text restored verbatim, and the
+integration conflicts were written up in DECISIONS "Open conflicts to plan".

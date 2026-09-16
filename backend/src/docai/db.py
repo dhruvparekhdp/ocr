@@ -48,7 +48,10 @@ class DocumentKind(StrEnum):
 
 
 class DocumentStatus(StrEnum):
-    UPLOADED = "uploaded"
+    QUEUED = "queued"
+    PROCESSING = "processing"
+    PARSED = "parsed"
+    FAILED = "failed"
 
 
 def _uuid() -> str:
@@ -81,8 +84,14 @@ class Document(Base):
     mime_type: Mapped[str] = mapped_column(String(100))
     kind: Mapped[DocumentKind] = mapped_column(String(20))
     size_bytes: Mapped[int]
-    status: Mapped[DocumentStatus] = mapped_column(String(20), default=DocumentStatus.UPLOADED)
+    status: Mapped[DocumentStatus] = mapped_column(String(20), default=DocumentStatus.QUEUED, index=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now)
+    attempts: Mapped[int] = mapped_column(default=0)
+    locked_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    error: Mapped[str | None] = mapped_column(Text)
+    page_count: Mapped[int | None]
+    parser_version: Mapped[int | None]
+    parsed_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
 
 def build_engine(url: str) -> Engine:

@@ -6,6 +6,8 @@ from sqlalchemy import select
 
 from docai.db import Tenant, get_sessionmaker
 from docai.doc_schema import load_schema
+from docai.settings import get_settings
+from docai.storage import UploadRejected, sniff_file
 from docai.tenants import create_tenant, rotate_api_key
 
 
@@ -23,7 +25,13 @@ def main(argv: list[str] | None = None) -> int:
     rotate = sub.add_parser("rotate-key", help="issue a new API key, invalidating the old one")
     rotate.add_argument("slug")
 
+    parse = sub.add_parser("parse", help="parse a local file and print the result (no database)")
+    parse.add_argument("file", type=Path)
+    parse.add_argument("--format", choices=["text", "json"], default="text")
+
     args = parser.parse_args(argv)
+    if args.command == "parse":
+        return _parse(args.file, args.format)
     with get_sessionmaker()() as session:
         if args.command == "create-tenant":
             schema = load_schema(args.schema) if args.schema else None
@@ -39,6 +47,21 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"no tenant {args.slug!r}", file=sys.stderr)
                 return 1
             print(f"new API key (shown once): {rotate_api_key(session, tenant)}")
+    return 0
+
+
+def _parse(path: Path, fmt: str) -> int:
+    from docai.ingest import ParseError, parse_file
+
+    try:
+        mime_type, kind = sniff_file(path, path.name)
+        parsed = parse_file(path, kind, mime_type, path.name, get_settings().max_pages)
+    except (UploadRejected, ParseError) as e:
+        print(e, file=sys.stderr)
+        return 1
+    print(parsed.to_text() if fmt == "text" else parsed.model_dump_json(indent=2))
+    for warning in parsed.warnings:
+        print(f"warning: {warning}", file=sys.stderr)
     return 0
 
 

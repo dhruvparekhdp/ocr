@@ -1,21 +1,23 @@
+# runtime data: database, uploaded client documents
+data/
+.env
+
+# evaluation set: real documents and their labels are private
+eval/documents/
+eval/labels/
+eval/runs/
+
+# python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# legacy node app
 node_modules/
 batches.json
 sample_pdfs/
 pdfs/
 *.log
-
-# local-llm: training artifacts, extracted text, and trained checkpoints are
-# user-specific (and can be large / derived from private documents) — never
-# committed. Only the pipeline code and the labels template are tracked.
-local-llm/venv/
-local-llm/checkpoints/
-local-llm/data/texts/
-local-llm/data/*.jsonl
-!local-llm/data/labels.template.jsonl
-local-llm/scratch/venv/
-local-llm/scratch/checkpoints/
-local-llm/scratch/tokenizer/
-local-llm/scratch/data/
-local-llm/__pycache__/
-**/__pycache__/
-*.pyc
+.DS_Store

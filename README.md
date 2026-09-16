@@ -7,6 +7,9 @@ per-client schemas and branding. Built to be sold as a white-label product or ru
 > Parsing, extraction and Q&A arrive in P1–P3. The previous Node prototype lives in `legacy/` for
 > reference only (it is not compatible with the v2 schema).
 
+More context: [CLAUDE.md](CLAUDE.md) (working rules), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
+[docs/DECISIONS.md](docs/DECISIONS.md), [docs/HISTORY.md](docs/HISTORY.md).
+
 ## Roadmap
 
 | Phase | Scope |

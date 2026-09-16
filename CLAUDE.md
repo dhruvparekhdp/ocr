@@ -20,7 +20,7 @@ down in the relevant file:
   rejected) → `docs/DECISIONS.md`.
 - **How the system fits together today** → `docs/ARCHITECTURE.md`.
 - **How the project got here / what changed and why** → `docs/HISTORY.md`.
-- **User-facing behavior, setup, and known limitations** → `README.md`.
+- **User-facing behavior, setup, roadmap, and known limitations** → `README.md`.
 
 Do not let a significant decision exist only as something said in
 conversation. If you are about to explain a "why" to the user that isn't
@@ -29,39 +29,55 @@ it into one of the files above before moving on.
 
 ## Orientation
 
-This is a self-contained document classifier: PDF → text (embedded, or
-offline OCR for scans) → classify + extract fields (from-scratch heuristics,
-no ML model, no LLM, no cloud call) → batch related documents. Read, in
-order:
+**Product goal:** a white-label AI document analyser for finance documents
+(PDFs, scans, photos, Excel/CSV) that the owner can sell to clients or run as
+a service. Global documents, English first.
 
-1. `README.md` — what it does, how to run it, what it extracts, and its
-   honestly-documented limitations.
-2. `docs/ARCHITECTURE.md` — the pipeline and every module's responsibility.
-3. `docs/DECISIONS.md` — why the system looks the way it does, including
-   approaches that were deliberately rejected.
-4. `docs/HISTORY.md` — the project went through several complete pivots
-   (keyword regex → LLM-based → locally fine-tuned models → fully
-   self-contained heuristics). This explains why, so old approaches aren't
-   accidentally reintroduced without knowing they were already tried.
+**Current code:** a Python backend in `backend/` (FastAPI, SQLAlchemy,
+multi-tenant). The previous Node.js prototype is in `legacy/` for reference
+only — do not extend it. Read, in order:
+
+1. `README.md` — roadmap (phases P0–P5), setup, API, eval workflow.
+2. `docs/ARCHITECTURE.md` — how the backend fits together today.
+3. `docs/DECISIONS.md` — why it looks this way, including superseded
+   decisions and rejected approaches.
+4. `docs/HISTORY.md` — the project pivoted many times; this explains why, so
+   old approaches aren't reintroduced by accident.
 
 ## Working conventions for this repo
 
-- **No cloud calls, no LLM, no trained ML model.** This was a deliberate,
-  explicit instruction from the project owner (see `docs/HISTORY.md`). Do not
-  reintroduce an API-based classifier (Claude, OpenAI, etc.) or a
-  fine-tuned/pretrained model as the default path without being asked.
-  `docs/DECISIONS.md` records what was tried before and removed.
-- **Everything schema-driven stays schema-driven.** Document types, fields,
-  extractors, and branding live in `config/schema.json` (loaded via
-  `schema.js`). Don't hardcode a document type or field name into
-  `analyze.js`, `extractors.js`, `index.js`, or the web UI — add it to the
-  schema instead.
-- **Verify claims before writing them down.** Every claim in this repo's docs
-  (e.g. "offline OCR runs with zero network," "preprocessing improves
-  accuracy on small text") was checked by actually running it, not assumed.
-  Keep that standard — if you add a claim, verify it, and note briefly how it
-  was verified if it's not obvious from the code.
-- **Be honest about limitations in writing.** `README.md`'s "Gaps and
-  limitations" section is deliberately candid. When you find a new limitation
-  or a heuristic that doesn't generalize, add it there rather than letting it
-  surface only as a support conversation later.
+- **Models and cloud APIs are allowed (since 2026-09-16).** The earlier
+  "no cloud, no LLM, no model" rule is superseded — see `docs/DECISIONS.md`.
+  Groq is the LLM/VLM provider for now; the long-term target is the owner's
+  own fine-tuned model running fully offline, after which the API path is
+  removed. Keep every LLM call behind a provider interface so that swap is
+  local.
+- **Commercial licences only.** This is sold commercially. Every dependency,
+  model weight, and dataset must permit commercial use (MIT/Apache/BSD etc.).
+  No AGPL (e.g. PyMuPDF), no non-commercial model licences, no
+  non-commercial datasets. Check before adding anything.
+- **Multi-tenant everywhere.** Every row, file, and query is scoped to a
+  tenant. A tenant must never be able to read or infer another tenant's data.
+  Add a cross-tenant test for any new endpoint.
+- **Schema-driven stays schema-driven.** Document types, fields, and branding
+  come from `config/schema.json` (or a tenant's own schema). Don't hardcode a
+  document type or field name in pipeline code or UI.
+- **Measure, don't assume.** Accuracy claims are checked against the labelled
+  eval set (`docai-eval`) or a reproducible test, not asserted. Note briefly
+  how a claim was verified when it isn't obvious from the code.
+- **Hardware reality.** Dev machine is an Intel (x86_64) Mac with 8 GB RAM, no
+  GPU, no Docker. Prefer CPU-friendly dependencies with x86_64 macOS wheels;
+  heavy training happens on free cloud notebooks, not locally.
+- **Be honest about limitations in writing.** Keep README's limitations
+  current when you find a gap.
+
+## Commands
+
+```bash
+cd backend
+uv sync
+uv run pytest
+uv run ruff check . && uv run ruff format .
+uv run alembic upgrade head
+uv run uvicorn docai.main:app --reload
+```

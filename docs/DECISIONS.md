@@ -6,7 +6,109 @@ file is to stop a future session (human or Claude) from re-litigating a
 question that was already answered, or re-trying something that was already
 tried and found wanting.
 
-## No cloud, no LLM, no trained ML model (current state)
+Newest decisions first. Sections marked **Superseded** or **Legacy (Node)**
+are kept for context; they no longer describe the current system.
+
+## Product direction: sellable white-label analyser, Groq now, own model later (2026-09-16)
+
+**Decision:** The goal is a commercial product — sold white-label or run as a
+service — that turns finance documents (PDF, scans, photos, XLSX/CSV,
+including images embedded in PDFs/spreadsheets) into validated structured
+data and supports reasoning/Q&A over it. Global documents, English first.
+Cloud LLM/VLM calls via **Groq** are allowed for now. Once the owner's own
+fine-tuned model is good enough (roadmap P4), the API path is removed and the
+product runs fully offline.
+
+**Why:** Heuristics (the previous state) topped out on exactly the fields
+that matter — issuer vs recipient, addresses, tables, unusual layouts — and
+can't do reasoning at all. The owner has a Groq API key but no GPU budget, so
+cloud inference now + distillation into a small own model later is the only
+path that is both accurate soon and offline eventually.
+
+**Training from scratch is rejected** (again — see `HISTORY.md` step 3): it
+needs data and compute this project doesn't have. "Own model" means
+fine-tuning a small, commercially licensed open-weight model on reviewed
+outputs, on free cloud notebooks (the dev Mac cannot train).
+
+**Consequence:** the old "no cloud / no LLM / no model" rule below is
+superseded, and the Docling "open question" is answered: local ML models are
+in scope.
+
+## Python backend replaces the Node prototype (2026-09-16)
+
+**Decision:** New backend in Python (FastAPI, Pydantic v2, SQLAlchemy 2,
+Alembic, `uv`). The Node app moved to `legacy/` as reference only.
+
+**Why:** Document-AI tooling (PDF parsing, OCR models, table extraction,
+fine-tuning, eval) is Python-first. Running a Python sidecar next to Node
+would add a process boundary for every step. The Node code was ~1.5k lines,
+so porting what's worth keeping (schema-driven design, union-find batching,
+preprocessing lessons) is cheaper than bridging.
+
+## Commercial-use licences only (2026-09-16)
+
+**Decision:** Every dependency, model weight, and dataset must permit
+commercial use.
+
+**Why:** It's sold. Concretely this rules out PyMuPDF (AGPL — use
+pypdfium2/pdfplumber instead), model sizes released under non-commercial or
+research licences (check each Qwen-VL/other size individually), and
+non-commercial public datasets for training. When distilling from API model
+outputs, prefer models whose licence allows training on outputs (e.g.
+gpt-oss, Apache-2.0) and re-check Groq's terms.
+
+## Multi-tenancy from P0 (2026-09-16)
+
+**Decision:** Tenants (with hashed API keys and an optional per-tenant
+schema) exist from the first commit; every document row and stored file is
+tenant-scoped, and dedupe is per tenant.
+
+**Why:** White-label selling means several clients on one deployment.
+Retrofitting tenant isolation later means migrating every table, file path,
+and query — and a missed `WHERE tenant_id` is a data leak. Cross-tenant
+access returns 404 (not 403) so a tenant can't probe for other tenants'
+document IDs. Blob storage is per tenant rather than globally
+content-addressed so deleting one tenant's data can never affect another's
+and dedupe can't be used as a cross-tenant existence oracle.
+
+## Schema v2: typed fields instead of heuristic extractor names (2026-09-16)
+
+**Decision:** `config/schema.json` fields declare a `type` (`id`, `string`,
+`date`, `money`, `number`, `currency`, `table` with typed `columns`) instead
+of an `extractor` name. Keyword lists were dropped.
+
+**Why:** Extraction is now done by a model, so the schema must describe the
+*shape* of the answer (to build a JSON schema for constrained output and to
+validate it) rather than which heuristic to run. Types also let the eval
+scorer compare values correctly (money numerically, dates as dates, tables
+by rows).
+
+## Evaluation set before extraction work (2026-09-16)
+
+**Decision:** Build a labelled eval set (target 50–100 real documents) and
+score every pipeline change with `docai-eval` before choosing models or
+prompts (gates P2).
+
+**Why:** The July 2026 history pivoted five times in two days largely
+because there was no way to measure whether an approach was better. Labels
+are one JSON file per document with normalised conventions (ISO dates, plain
+decimals) so scoring is deterministic.
+
+## SQLite by default, Postgres-ready (2026-09-16)
+
+**Decision:** SQLAlchemy with SQLite as the default `DATABASE_URL`; Alembic
+migrations with an explicit constraint naming convention and batch mode for
+SQLite.
+
+**Why:** The dev Mac has no Docker/Homebrew/Postgres, and "free server or
+local" deployment favours zero infrastructure. The naming convention keeps
+migrations portable to Postgres. A `UTCDateTime` column type exists because
+SQLite drops tzinfo, which made API timestamps inconsistent (found while
+smoke-testing a live server).
+
+## Superseded: No cloud, no LLM, no trained ML model
+
+*Superseded on 2026-09-16 by "Product direction" above. Kept as context.*
 
 **Decision:** The pipeline uses zero API calls and zero machine-learning
 models of any kind. Classification is keyword scoring; extraction is regex
@@ -28,7 +130,11 @@ does come up again (e.g. for the fields heuristics handle worst — see
 "Docling" below), make it opt-in and clearly separated from the default
 offline path, not a silent replacement.
 
-## Docling — considered, not adopted (yet)
+## Docling — considered, not adopted (yet) — *open question answered*
+
+*2026-09-16: the owner confirmed models (local and cloud) are in scope, so the
+"open question" at the end of this section is resolved. Whether Docling itself
+is adopted is a P1 decision recorded separately.*
 
 **What it is:** Docling (`docling-project/docling`) is a document-understanding
 *orchestration* layer, not an OCR engine — it runs a layout-analysis model
@@ -60,7 +166,13 @@ project a hard line (no ML weights of any kind, ever) or specifically
 "no cloud, no LLM" (in which case local CV models like Docling's layout
 model are in scope)? This has not been answered yet.
 
-## OCR preprocessing: median filter + Otsu, not deskew
+## Legacy (Node): OCR preprocessing: median filter + Otsu, not deskew
+
+*Findings were for tesseract. They're a useful prior (upscaling small text
+matters; binarizing without denoising can produce confident garbage; naive
+deskew can make things worse) but must be re-measured for whichever OCR
+engine the Python backend uses — deep-learning OCR models are usually
+trained on grayscale/colour images and may not benefit from binarization.*
 
 **Decision:** `imagePreprocess.js` does conditional upscaling, grayscale
 conversion, a 3x3 median filter, and Otsu binarization before every OCR call.
@@ -98,7 +210,7 @@ project's stated preference for verified claims over assumed ones. It's
 recorded in `README.md`'s "Gaps and limitations" as a known, deliberately
 deferred gap rather than silently missing.
 
-## Rasterization uses `pdf-parse`'s own `getScreenshot`, not a second library
+## Legacy (Node): Rasterization uses `pdf-parse`'s own `getScreenshot`, not a second library
 
 **Decision:** `pdfIngest.js` uses the same `PDFParse` instance for both
 embedded-text extraction (`getText()`) and page rasterization for OCR
@@ -115,6 +227,9 @@ removed a dependency (`pdf-to-img`).
 
 ## Batching is union-find over configurable batch-key fields, not hardcoded relationships
 
+*Still the plan: to be ported to the Python backend in P2 (fields marked
+`isBatchKey` in schema v2).*
+
 **Decision:** `segregateIntoBatches` treats any two documents that share a
 non-null value in any field marked `isBatchKey: true` as belonging to the
 same batch (a union-find/disjoint-set over shared field values), rather than
@@ -130,6 +245,9 @@ and relationships the schema defines, without the batching code needing to
 know what those types mean.
 
 ## Schema-driven, not hardcoded, document types and fields
+
+*Still in force; schema v2 (above) changed the field format, and tenants can
+now carry their own schema instead of using `SCHEMA_PATH` per deployment.*
 
 **Decision:** `config/schema.json` is the single source of truth for
 document types, extractable fields, which fields are batch keys, and web UI

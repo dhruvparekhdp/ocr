@@ -114,3 +114,34 @@ added following an explicit instruction: keep project context, decisions,
 and rationale in the codebase itself rather than only in conversation
 history, so a future session (with no memory of these conversations) can
 reconstruct the full picture from the repo alone.
+
+## 8. Replan after a pause: sellable product, Groq, Python (2026-09-16)
+
+After roughly two months paused, the owner restated the goal: an OCR
+document analyser to **sell** (white-label or as a service), covering PDF,
+scans, images (including images inside PDFs/Excel), Excel, and reasoning over
+the data, using the latest stack. A Groq API key is available; there is no GPU
+budget (dev machine: Intel Mac, 8 GB RAM).
+
+Review of steps 1–7: the July work changed direction five times in two days
+because two things were never pinned down — cloud vs local, and how to
+measure "better". Kept: schema-driven white-label design, union-find
+batching, text-vs-OCR routing, honest limitations. Dropped: keyword
+classification and heuristic extractors (weakest fields per the old README).
+
+Agreed with the owner: Groq allowed now; own fine-tuned model later, then go
+fully offline; Python backend; global finance documents, English first;
+deploy locally or on a free host. Roadmap P0–P5 is in `README.md`; decisions
+are in `DECISIONS.md` dated 2026-09-16.
+
+## 9. P0: Python backend foundation (2026-09-16)
+
+`backend/` created (FastAPI, SQLAlchemy/Alembic, SQLite default): tenants
+with API keys and per-tenant schemas, content-sniffed uploads with
+per-tenant storage and dedupe, schema v2 with typed fields, and `docai-eval`
+for labelling and scoring. The Node app moved to `legacy/`.
+
+In parallel, another session committed step 6 (Node OCR preprocessing) and
+step 7 (these docs) to `origin/main`; that was merged on top of P0, with the
+Node changes relocated into `legacy/` and these docs updated to the new
+direction rather than discarded.

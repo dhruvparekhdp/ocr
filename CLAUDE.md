@@ -38,6 +38,7 @@ multi-tenant). The previous Node.js prototype is in `legacy/` for reference
 only — do not extend it. Read, in order:
 
 1. `README.md` — roadmap (phases P0–P5), setup, API, eval workflow.
+   The detailed, task-by-task plan is `docs/PLAN.md`.
 2. `docs/ARCHITECTURE.md` — how the backend fits together today.
 3. `docs/DECISIONS.md` — why it looks this way, including superseded
    decisions and rejected approaches.

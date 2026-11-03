@@ -9,7 +9,7 @@ per-client schemas and branding. Built to be sold as a white-label product or ru
 > being integrated as the product's **offline mode** alongside an **LLM mode** (see
 > [docs/DECISIONS.md](docs/DECISIONS.md) → "Dual mode" and "Open conflicts to plan").
 
-More context: [CLAUDE.md](CLAUDE.md) (working rules), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
+**Development plan: [docs/PLAN.md](docs/PLAN.md).** More context: [CLAUDE.md](CLAUDE.md) (working rules), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
 [docs/DECISIONS.md](docs/DECISIONS.md), [docs/HISTORY.md](docs/HISTORY.md).
 
 ## Roadmap

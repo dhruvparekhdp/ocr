@@ -162,3 +162,12 @@ own model from online model APIs; and never delete old context directly.
 Docs that had been rewritten wholesale earlier the same day (`CLAUDE.md`,
 `docs/ARCHITECTURE.md`) had their original text restored verbatim, and the
 integration conflicts were written up in DECISIONS "Open conflicts to plan".
+
+## 11. P2.1 offline extraction, then a pause and a replan (2026-09-17 → 2026-11-03)
+
+P2.1 ported the legacy Node extractors, classifier and batching into
+`backend/src/docai/extract/` (see DECISIONS "Owner decisions on the open
+conflicts" and "LLM runtime"). Work then paused for about seven weeks. On
+2026-11-03 the owner asked for a detailed replan so another coding agent
+(Cursor) can carry out development; that plan is `docs/PLAN.md`, with
+`AGENTS.md` pointing agents at `CLAUDE.md` and the plan.

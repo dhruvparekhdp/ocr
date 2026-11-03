@@ -6,150 +6,564 @@
     "logoUrl": null
   },
   "documentTypes": [
-    { "name": "Invoice", "description": "A request for payment from a seller to a buyer: tax invoice, commercial invoice, bill." },
-    { "name": "Credit Note", "description": "A document reducing or reversing an amount previously invoiced." },
-    { "name": "Purchase Order", "description": "A buyer's order authorizing a purchase from a vendor." },
-    { "name": "Quotation", "description": "A seller's price offer or proforma invoice issued before an order." },
-    { "name": "Receipt", "description": "Proof of a completed payment: till receipt, payment receipt, cash receipt." },
-    { "name": "Bank Statement", "description": "A periodic account statement listing transactions and balances." },
-    { "name": "Unknown", "description": "Anything that does not match another configured document type." }
+    {
+      "name": "Invoice",
+      "description": "A request for payment from a seller to a buyer: tax invoice, commercial invoice, bill.",
+      "keywords": [
+        "Tax Invoice",
+        "Commercial Invoice",
+        "Invoice",
+        "Invoice No",
+        "Invoice Number",
+        "Invoice Date",
+        "Bill To",
+        "Amount Due",
+        "Total Due",
+        "Due Date",
+        "GSTIN",
+        "VAT"
+      ],
+      "keywordWeight": 5
+    },
+    {
+      "name": "Credit Note",
+      "description": "A document reducing or reversing an amount previously invoiced.",
+      "keywords": [
+        "Credit Note",
+        "Credit Memo",
+        "Credit Note No",
+        "Original Invoice",
+        "Amount Credited"
+      ],
+      "keywordWeight": 7
+    },
+    {
+      "name": "Purchase Order",
+      "description": "A buyer's order authorizing a purchase from a vendor.",
+      "keywords": [
+        "Purchase Order",
+        "PO No",
+        "P.O.",
+        "Order Date",
+        "Vendor",
+        "Ship To",
+        "Delivery Date"
+      ],
+      "keywordWeight": 5
+    },
+    {
+      "name": "Quotation",
+      "description": "A seller's price offer or proforma invoice issued before an order.",
+      "keywords": [
+        "Quotation",
+        "Quote",
+        "Proforma Invoice",
+        "Estimate",
+        "Valid Until",
+        "Quote No"
+      ],
+      "keywordWeight": 6
+    },
+    {
+      "name": "Receipt",
+      "description": "Proof of a completed payment: till receipt, payment receipt, cash receipt.",
+      "keywords": [
+        "Receipt",
+        "Receipt No",
+        "Receipt Number",
+        "Cash Receipt",
+        "Payment Received",
+        "Amount Paid",
+        "Paid",
+        "Change"
+      ],
+      "keywordWeight": 4
+    },
+    {
+      "name": "Bank Statement",
+      "description": "A periodic account statement listing transactions and balances.",
+      "keywords": [
+        "Account Statement",
+        "Bank Statement",
+        "Statement Period",
+        "Opening Balance",
+        "Closing Balance",
+        "Account Number",
+        "IBAN",
+        "Transaction",
+        "Debit",
+        "Credit",
+        "Balance"
+      ],
+      "keywordWeight": 4
+    },
+    {
+      "name": "Unknown",
+      "description": "Anything that does not match another configured document type."
+    }
   ],
   "fields": [
     {
       "name": "documentNumber",
       "type": "id",
       "description": "The document's own identifying number: invoice no, credit note no, PO no, quote no, receipt no.",
-      "appliesTo": ["Invoice", "Credit Note", "Purchase Order", "Quotation", "Receipt"],
-      "isBatchKey": true
+      "appliesTo": [
+        "Invoice",
+        "Credit Note",
+        "Purchase Order",
+        "Quotation",
+        "Receipt"
+      ],
+      "isBatchKey": true,
+      "extractor": "labeledId",
+      "labels": [
+        "Invoice No",
+        "Invoice Number",
+        "Invoice #",
+        "Inv No",
+        "Credit Note No",
+        "Credit Note Number",
+        "PO No",
+        "PO Number",
+        "P.O. Number",
+        "Purchase Order No",
+        "Purchase Order Number",
+        "Order No",
+        "Quote No",
+        "Quotation No",
+        "Estimate No",
+        "Receipt No",
+        "Receipt Number",
+        "Bill No",
+        "Document No",
+        "Doc No"
+      ]
     },
     {
       "name": "referenceNumber",
       "type": "id",
       "description": "Another document this one points to, e.g. the PO number on an invoice or the original invoice number on a credit note.",
-      "appliesTo": ["Invoice", "Credit Note", "Receipt"],
-      "isBatchKey": true
+      "appliesTo": [
+        "Invoice",
+        "Credit Note",
+        "Receipt"
+      ],
+      "isBatchKey": true,
+      "extractor": "labeledId",
+      "labels": [
+        "PO Ref",
+        "PO Reference",
+        "Your PO",
+        "Customer PO",
+        "Purchase Order Ref",
+        "Order Ref",
+        "Reference No",
+        "Ref No",
+        "Original Invoice",
+        "Against Invoice",
+        "Invoice Ref"
+      ]
     },
     {
       "name": "issuerName",
       "type": "string",
       "description": "Legal name of the party that issued the document (seller, vendor, merchant, bank).",
-      "appliesTo": ["Invoice", "Credit Note", "Purchase Order", "Quotation", "Receipt", "Bank Statement"]
+      "appliesTo": [
+        "Invoice",
+        "Credit Note",
+        "Purchase Order",
+        "Quotation",
+        "Receipt",
+        "Bank Statement"
+      ],
+      "extractor": "company"
     },
     {
       "name": "issuerAddress",
       "type": "string",
       "description": "Full postal address of the issuer, as a single line.",
-      "appliesTo": ["Invoice", "Credit Note", "Purchase Order", "Quotation", "Receipt", "Bank Statement"]
+      "appliesTo": [
+        "Invoice",
+        "Credit Note",
+        "Purchase Order",
+        "Quotation",
+        "Receipt",
+        "Bank Statement"
+      ],
+      "extractor": "address"
     },
     {
       "name": "issuerTaxId",
       "type": "id",
       "description": "Issuer's tax registration number (VAT, GSTIN, EIN, ABN, TRN, etc.).",
-      "appliesTo": ["Invoice", "Credit Note", "Purchase Order", "Quotation", "Receipt"]
+      "appliesTo": [
+        "Invoice",
+        "Credit Note",
+        "Purchase Order",
+        "Quotation",
+        "Receipt"
+      ],
+      "extractor": "labeledId",
+      "labels": [
+        "GSTIN",
+        "GST No",
+        "VAT No",
+        "VAT Number",
+        "VAT Reg No",
+        "VAT ID",
+        "Tax ID",
+        "TIN",
+        "TRN",
+        "EIN",
+        "ABN",
+        "UEN",
+        "Company Reg No"
+      ]
     },
     {
       "name": "recipientName",
       "type": "string",
       "description": "Name of the party the document is addressed to (buyer, bill-to, account holder).",
-      "appliesTo": ["Invoice", "Credit Note", "Purchase Order", "Quotation", "Bank Statement"]
+      "appliesTo": [
+        "Invoice",
+        "Credit Note",
+        "Purchase Order",
+        "Quotation",
+        "Bank Statement"
+      ],
+      "extractor": "labeledText",
+      "labels": [
+        "Bill To",
+        "Billed To",
+        "Sold To",
+        "Customer",
+        "Client",
+        "Buyer",
+        "Invoice To",
+        "Account Holder",
+        "Account Name"
+      ]
     },
     {
       "name": "recipientAddress",
       "type": "string",
       "description": "Full postal address of the recipient, as a single line.",
-      "appliesTo": ["Invoice", "Credit Note", "Purchase Order", "Quotation", "Bank Statement"]
+      "appliesTo": [
+        "Invoice",
+        "Credit Note",
+        "Purchase Order",
+        "Quotation",
+        "Bank Statement"
+      ],
+      "extractor": "labeledAddress",
+      "labels": [
+        "Bill To",
+        "Billed To",
+        "Sold To",
+        "Invoice To",
+        "Ship To",
+        "Customer Address"
+      ]
     },
     {
       "name": "documentDate",
       "type": "date",
       "description": "Issue date of the document.",
-      "appliesTo": ["Invoice", "Credit Note", "Purchase Order", "Quotation", "Receipt"]
+      "appliesTo": [
+        "Invoice",
+        "Credit Note",
+        "Purchase Order",
+        "Quotation",
+        "Receipt"
+      ],
+      "extractor": "date",
+      "labels": [
+        "Invoice Date",
+        "Date of Issue",
+        "Issue Date",
+        "Order Date",
+        "Quote Date",
+        "Receipt Date",
+        "Credit Note Date",
+        "Date"
+      ],
+      "fallback": "firstDate"
     },
     {
       "name": "dueDate",
       "type": "date",
       "description": "Payment due date.",
-      "appliesTo": ["Invoice"]
+      "appliesTo": [
+        "Invoice"
+      ],
+      "extractor": "date",
+      "labels": [
+        "Due Date",
+        "Payment Due",
+        "Pay By",
+        "Due By"
+      ]
     },
     {
       "name": "currency",
       "type": "currency",
       "description": "ISO 4217 currency code of the monetary amounts, e.g. USD, EUR, INR.",
-      "appliesTo": ["Invoice", "Credit Note", "Purchase Order", "Quotation", "Receipt", "Bank Statement"]
+      "appliesTo": [
+        "Invoice",
+        "Credit Note",
+        "Purchase Order",
+        "Quotation",
+        "Receipt",
+        "Bank Statement"
+      ],
+      "extractor": "currency",
+      "labels": [
+        "Currency"
+      ]
     },
     {
       "name": "subtotal",
       "type": "money",
       "description": "Total before tax.",
-      "appliesTo": ["Invoice", "Credit Note", "Purchase Order", "Quotation", "Receipt"]
+      "appliesTo": [
+        "Invoice",
+        "Credit Note",
+        "Purchase Order",
+        "Quotation",
+        "Receipt"
+      ],
+      "extractor": "amount",
+      "labels": [
+        "Subtotal",
+        "Sub Total",
+        "Sub-total",
+        "Net Amount",
+        "Total Before Tax",
+        "Taxable Value",
+        "Net Total"
+      ]
     },
     {
       "name": "taxAmount",
       "type": "money",
       "description": "Total tax charged.",
-      "appliesTo": ["Invoice", "Credit Note", "Purchase Order", "Quotation", "Receipt"]
+      "appliesTo": [
+        "Invoice",
+        "Credit Note",
+        "Purchase Order",
+        "Quotation",
+        "Receipt"
+      ],
+      "extractor": "amount",
+      "labels": [
+        "Total Tax",
+        "Tax Amount",
+        "VAT Amount",
+        "GST Amount",
+        "Sales Tax",
+        "Tax",
+        "VAT",
+        "IGST",
+        "CGST",
+        "SGST"
+      ]
     },
     {
       "name": "totalAmount",
       "type": "money",
       "description": "Grand total including tax.",
-      "appliesTo": ["Invoice", "Credit Note", "Purchase Order", "Quotation", "Receipt"]
+      "appliesTo": [
+        "Invoice",
+        "Credit Note",
+        "Purchase Order",
+        "Quotation",
+        "Receipt"
+      ],
+      "extractor": "amount",
+      "labels": [
+        "Grand Total",
+        "Total Due",
+        "Amount Due",
+        "Balance Due",
+        "Total Amount",
+        "Amount Paid",
+        "Net Payable",
+        "Invoice Total",
+        "Total Payable",
+        "Amount Credited",
+        "Total"
+      ],
+      "fallback": "largestAmount"
     },
     {
       "name": "lineItems",
       "type": "table",
       "description": "Itemised lines of goods or services.",
-      "appliesTo": ["Invoice", "Credit Note", "Purchase Order", "Quotation", "Receipt"],
+      "appliesTo": [
+        "Invoice",
+        "Credit Note",
+        "Purchase Order",
+        "Quotation",
+        "Receipt"
+      ],
       "columns": [
-        { "name": "description", "type": "string" },
-        { "name": "quantity", "type": "number" },
-        { "name": "unitPrice", "type": "money" },
-        { "name": "amount", "type": "money" }
+        {
+          "name": "description",
+          "type": "string"
+        },
+        {
+          "name": "quantity",
+          "type": "number"
+        },
+        {
+          "name": "unitPrice",
+          "type": "money"
+        },
+        {
+          "name": "amount",
+          "type": "money"
+        }
       ]
     },
     {
       "name": "accountNumber",
       "type": "id",
       "description": "Bank account number or IBAN the statement is for.",
-      "appliesTo": ["Bank Statement"],
-      "isBatchKey": true
+      "appliesTo": [
+        "Bank Statement"
+      ],
+      "isBatchKey": true,
+      "extractor": "labeledId",
+      "labels": [
+        "Account Number",
+        "Account No",
+        "A/C No",
+        "Account #",
+        "IBAN"
+      ]
     },
     {
       "name": "periodStart",
       "type": "date",
       "description": "First date covered by the statement.",
-      "appliesTo": ["Bank Statement"]
+      "appliesTo": [
+        "Bank Statement"
+      ],
+      "extractor": "date",
+      "labels": [
+        "Statement Period",
+        "Period From",
+        "From Date",
+        "From"
+      ]
     },
     {
       "name": "periodEnd",
       "type": "date",
       "description": "Last date covered by the statement.",
-      "appliesTo": ["Bank Statement"]
+      "appliesTo": [
+        "Bank Statement"
+      ],
+      "extractor": "date",
+      "labels": [
+        "Period To",
+        "To Date",
+        "To"
+      ]
     },
     {
       "name": "openingBalance",
       "type": "money",
       "description": "Balance at the start of the period.",
-      "appliesTo": ["Bank Statement"]
+      "appliesTo": [
+        "Bank Statement"
+      ],
+      "extractor": "amount",
+      "labels": [
+        "Opening Balance",
+        "Balance Brought Forward",
+        "Previous Balance",
+        "Beginning Balance"
+      ]
     },
     {
       "name": "closingBalance",
       "type": "money",
       "description": "Balance at the end of the period.",
-      "appliesTo": ["Bank Statement"]
+      "appliesTo": [
+        "Bank Statement"
+      ],
+      "extractor": "amount",
+      "labels": [
+        "Closing Balance",
+        "Ending Balance",
+        "Balance Carried Forward",
+        "Available Balance"
+      ]
     },
     {
       "name": "transactions",
       "type": "table",
       "description": "Statement transaction rows.",
-      "appliesTo": ["Bank Statement"],
+      "appliesTo": [
+        "Bank Statement"
+      ],
       "columns": [
-        { "name": "date", "type": "date" },
-        { "name": "description", "type": "string" },
-        { "name": "debit", "type": "money" },
-        { "name": "credit", "type": "money" },
-        { "name": "balance", "type": "money" }
+        {
+          "name": "date",
+          "type": "date"
+        },
+        {
+          "name": "description",
+          "type": "string"
+        },
+        {
+          "name": "debit",
+          "type": "money"
+        },
+        {
+          "name": "credit",
+          "type": "money"
+        },
+        {
+          "name": "balance",
+          "type": "money"
+        }
       ]
+    }
+  ],
+  "validations": [
+    {
+      "rule": "sum",
+      "fields": [
+        "subtotal",
+        "taxAmount"
+      ],
+      "equals": "totalAmount"
+    },
+    {
+      "rule": "sumColumn",
+      "table": "lineItems",
+      "column": "amount",
+      "equals": "subtotal"
+    },
+    {
+      "rule": "notBefore",
+      "field": "dueDate",
+      "reference": "documentDate"
+    },
+    {
+      "rule": "notBefore",
+      "field": "periodEnd",
+      "reference": "periodStart"
+    },
+    {
+      "rule": "balance",
+      "opening": "openingBalance",
+      "table": "transactions",
+      "credit": "credit",
+      "debit": "debit",
+      "closing": "closingBalance"
     }
   ]
 }

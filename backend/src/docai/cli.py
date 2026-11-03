@@ -25,6 +25,13 @@ def main(argv: list[str] | None = None) -> int:
     rotate = sub.add_parser("rotate-key", help="issue a new API key, invalidating the old one")
     rotate.add_argument("slug")
 
+    analyze = sub.add_parser(
+        "analyze", help="offline: parse, classify, extract and batch every file in a folder (legacy index.js parity)"
+    )
+    analyze.add_argument("directory", type=Path)
+    analyze.add_argument("--out", type=Path, help="write the JSON report here (default: print it)")
+    analyze.add_argument("--schema", type=Path, help="schema JSON (defaults to config/schema.json)")
+
     parse = sub.add_parser("parse", help="parse a local file and print the result (no database)")
     parse.add_argument("file", type=Path)
     parse.add_argument("--format", choices=["text", "json"], default="text")
@@ -32,6 +39,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "parse":
         return _parse(args.file, args.format)
+    if args.command == "analyze":
+        return _analyze(args.directory, args.out, args.schema)
     with get_sessionmaker()() as session:
         if args.command == "create-tenant":
             schema = load_schema(args.schema) if args.schema else None
@@ -62,6 +71,67 @@ def _parse(path: Path, fmt: str) -> int:
     print(parsed.to_text() if fmt == "text" else parsed.model_dump_json(indent=2))
     for warning in parsed.warnings:
         print(f"warning: {warning}", file=sys.stderr)
+    return 0
+
+
+def _analyze(directory: Path, out: Path | None, schema_path: Path | None) -> int:
+    import json
+    from datetime import UTC, datetime
+
+    from docai.doc_schema import get_schema
+    from docai.extract.batching import BatchItem, segregate
+    from docai.extract.heuristic import extract_offline
+    from docai.extract.validate import validate
+    from docai.ingest import ParseError, parse_file
+
+    schema = load_schema(schema_path) if schema_path else get_schema()
+    documents, errors, items = [], [], []
+    for path in sorted(p for p in directory.iterdir() if p.is_file() and not p.name.startswith(".")):
+        try:
+            mime_type, kind = sniff_file(path, path.name)
+            parsed = parse_file(path, kind, mime_type, path.name, get_settings().max_pages)
+        except (UploadRejected, ParseError) as e:
+            errors.append({"file": path.name, "reason": str(e)})
+            continue
+        extraction = validate(extract_offline(parsed, schema), schema)
+        used_ocr = any(page.source != "text" for page in parsed.pages) or any(s.images for s in parsed.sheets)
+        documents.append(
+            {
+                "file": path.name,
+                "source": "ocr" if used_ocr else "text",
+                "documentType": extraction.document_type,
+                "fields": extraction.values(),
+                "additionalFields": [a.model_dump() for a in extraction.additional_fields],
+                "issues": extraction.issues,
+            }
+        )
+        items.append(BatchItem(path.name, path.name, extraction.document_type, extraction.values()))
+
+    grouping = segregate(items, [f.name for f in schema.fields if f.isBatchKey])
+    report = {
+        "generatedAt": datetime.now(UTC).isoformat(),
+        "sourceDirectory": str(directory),
+        "summary": {
+            "totalFiles": len(documents) + len(errors),
+            "analyzed": len(documents),
+            "ocrUsed": sum(d["source"] == "ocr" for d in documents),
+            "failed": len(errors),
+            "batches": len(grouping["batches"]),
+            "unbatched": len(grouping["unbatched"]),
+        },
+        "batches": grouping["batches"],
+        "unbatched": grouping["unbatched"],
+        "documents": documents,
+        "errors": errors,
+    }
+    text = json.dumps(report, indent=2, ensure_ascii=False)
+    if out:
+        out.write_text(text + "\n")
+        print(
+            f"analyzed {len(documents)} file(s), {len(errors)} error(s), {len(grouping['batches'])} batch(es) -> {out}"
+        )
+    else:
+        print(text)
     return 0
 
 

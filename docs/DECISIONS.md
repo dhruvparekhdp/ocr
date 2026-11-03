@@ -10,7 +10,45 @@ Newest decisions first. Sections marked **Revised**, **Superseded** or
 **Legacy (Node)** are kept for context. Old context is never deleted directly
 (owner's rule, 2026-09-16); conflicts go in "Open conflicts to plan".
 
-## Open conflicts to plan (raised 2026-09-16, awaiting owner decisions)
+## Owner decisions on the open conflicts (2026-09-16)
+
+Resolves the list below (kept for context). Where the owner said "go with
+your proposals", the proposal stands unless changed here.
+
+1. **Schema:** keep both — typed fields for LLM extraction **and** the legacy
+   `keywords`/`labels`/`extractor` keys for offline extraction.
+2. **Field names:** v2 vocabulary (`issuerName`, `totalAmount`, …). A value
+   the document shows that has no schema field is still returned, under the
+   label the document uses (`additionalFields`).
+3. **OCR:** engineering call, judged against the end goal. RapidOCR stays.
+   Legacy median+Otsu was re-measured on RapidOCR and made results much worse
+   (e.g. clean 12 px text 1.00 → 0.30 similarity, uneven lighting 1.00 →
+   0.14; Otsu alone 1.00 → 0.34 on uneven lighting). It is ported as an
+   opt-in setting, off by default. CLAHE contrast normalisation was neutral.
+4. **Upload page:** build a new page (not a port of the legacy HTML).
+5. **Batching:** port union-find as proposed.
+6. **Modes:** offline, LLM and hybrid, with hybrid done "the best way
+   possible" (see "LLM runtime" below).
+7. **Training data:** not per-client opt-in. Train the base capability from
+   current LLM APIs (teacher models) on synthetic/public documents, so our own
+   model reaches basic extraction and reasoning without needing client data.
+8. **Node app:** integrate everything from it into Python, then continue with
+   the new version.
+
+## LLM runtime: our own self-hosted model only; API models are teachers (2026-09-16)
+
+**Decision:** Live processing of client documents in LLM/hybrid mode only
+ever uses **our own model on infrastructure we control** (local or our cloud
+server), never a paid third-party model API. Groq and other APIs are used
+**only in the training pipeline**, on synthetic or public documents, as
+teachers. Enforced in code: the tenant pipeline can only use the `local`
+provider.
+
+**Why:** Owner's instruction, for client data security — it's also a selling
+point for a white-label product. Until our fine-tuned model is ready, the
+local provider serves an open-weight base model with a commercial licence.
+
+## Open conflicts to plan (raised 2026-09-16, resolved above)
 
 Integrating the legacy Node pipeline into the Python product surfaced these.
 Each has a proposal; none is implemented until agreed.

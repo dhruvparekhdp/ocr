@@ -32,6 +32,10 @@ def parsed_path(storage_dir: Path, tenant_id: str, document_id: str) -> Path:
     return storage_dir / tenant_id / "parsed" / f"{document_id}.json"
 
 
+def extraction_path(storage_dir: Path, tenant_id: str, document_id: str) -> Path:
+    return storage_dir / tenant_id / "parsed" / f"{document_id}.extraction.json"
+
+
 def write_atomic(path: Path, data: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.tmp")

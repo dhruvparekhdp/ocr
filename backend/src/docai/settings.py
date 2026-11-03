@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     max_upload_mb: int = 50
     max_pages: int = 300
     embedded_worker: bool = False
+    # Legacy median+Otsu preprocessing. Off: it measurably hurts RapidOCR (docs/DECISIONS.md, owner decisions #3).
+    ocr_binarize: bool = False
     groq_api_key: str | None = None
 
 

@@ -50,8 +50,15 @@ class DocumentKind(StrEnum):
 class DocumentStatus(StrEnum):
     QUEUED = "queued"
     PROCESSING = "processing"
-    PARSED = "parsed"
+    PARSED = "parsed"  # text is available; extraction not done (or failed and can be retried)
+    EXTRACTED = "extracted"
     FAILED = "failed"
+
+
+class ProcessingMode(StrEnum):
+    OFFLINE = "offline"  # rules only, no model, no network
+    LLM = "llm"  # our self-hosted model
+    HYBRID = "hybrid"  # rules first, our model for missing, low-confidence or failing fields
 
 
 def _uuid() -> str:
@@ -70,6 +77,7 @@ class Tenant(Base):
     name: Mapped[str] = mapped_column(String(255))
     api_key_hash: Mapped[str] = mapped_column(String(64), unique=True)
     schema_json: Mapped[str | None] = mapped_column(Text)
+    mode: Mapped[ProcessingMode] = mapped_column(String(20), default=ProcessingMode.OFFLINE)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now)
 
 
@@ -85,6 +93,7 @@ class Document(Base):
     kind: Mapped[DocumentKind] = mapped_column(String(20))
     size_bytes: Mapped[int]
     status: Mapped[DocumentStatus] = mapped_column(String(20), default=DocumentStatus.QUEUED, index=True)
+    document_type: Mapped[str | None] = mapped_column(String(100))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=_now)
     attempts: Mapped[int] = mapped_column(default=0)
     locked_at: Mapped[datetime | None] = mapped_column(UTCDateTime)

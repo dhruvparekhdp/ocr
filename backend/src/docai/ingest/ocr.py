@@ -7,16 +7,27 @@ no model download at runtime, and it runs on x86_64 macOS where PyTorch wheels s
 import threading
 from functools import lru_cache
 
+import numpy as np
 from PIL import Image
 
 from docai.ingest.layout import Segment
 from docai.ingest.model import BBox
+from docai.settings import get_settings
 
 # Measured on synthetic invoice text (see docs/DECISIONS.md): upscaling 2x only helped very small, noisy
 # images (7px text: 0.67 -> 0.80 similarity) and was neutral otherwise; 3x made results worse.
 UPSCALE_BELOW_PX = 1000
 
 _lock = threading.Lock()
+
+
+def binarize(image: Image.Image) -> Image.Image:
+    """Legacy imagePreprocess.js: grayscale, 3x3 median filter, Otsu threshold. Opt-in via OCR_BINARIZE."""
+    import cv2
+
+    gray = cv2.cvtColor(np.asarray(image), cv2.COLOR_RGB2GRAY)
+    _, bw = cv2.threshold(cv2.medianBlur(gray, 3), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    return Image.fromarray(bw).convert("RGB")
 
 
 @lru_cache
@@ -31,6 +42,8 @@ def ocr_image(image: Image.Image, offset: BBox | None = None) -> list[Segment]:
     image = image.convert("RGB")
     if max(image.size) < UPSCALE_BELOW_PX:
         image = image.resize((image.width * 2, image.height * 2), Image.Resampling.LANCZOS)
+    if get_settings().ocr_binarize:
+        image = binarize(image)
 
     with _lock:
         result = _engine()(image)

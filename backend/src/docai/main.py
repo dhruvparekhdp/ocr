@@ -13,11 +13,13 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from docai.db import Document, DocumentKind, DocumentStatus, Tenant, get_session
+from docai.db import Document, DocumentKind, DocumentStatus, ProcessingMode, Tenant, get_session
 from docai.doc_schema import Branding, DocSchema
+from docai.extract.batching import BatchItem, segregate
+from docai.extract.result import Extraction
 from docai.ingest import ParsedDocument
 from docai.settings import Settings, get_settings
-from docai.storage import UploadRejected, blob_path, parsed_path, store_upload
+from docai.storage import UploadRejected, blob_path, extraction_path, parsed_path, store_upload
 from docai.tenants import find_by_api_key, tenant_schema
 
 MAX_FILES_PER_REQUEST = 200
@@ -70,6 +72,7 @@ class DocumentOut(BaseModel):
     kind: DocumentKind
     size_bytes: int
     status: DocumentStatus
+    document_type: str | None
     created_at: datetime
     error: str | None
     page_count: int | None
@@ -90,6 +93,7 @@ class DocumentPage(BaseModel):
 
 class TenantConfig(BaseModel):
     tenant: str
+    mode: ProcessingMode
     branding: Branding
     schema_: DocSchema = Field(serialization_alias="schema")
 
@@ -102,7 +106,7 @@ def health() -> dict[str, str]:
 @app.get("/api/config")
 def config(tenant: TenantDep) -> TenantConfig:
     schema = tenant_schema(tenant)
-    return TenantConfig(tenant=tenant.slug, branding=schema.branding, schema_=schema)
+    return TenantConfig(tenant=tenant.slug, mode=tenant.mode, branding=schema.branding, schema_=schema)
 
 
 def _find_document(session: Session, tenant_id: str, sha256: str) -> Document | None:
@@ -189,7 +193,7 @@ def get_document_file(document_id: str, tenant: TenantDep, session: SessionDep, 
 def reparse_document(document_id: str, tenant: TenantDep, session: SessionDep) -> DocumentOut:
     doc = _get_or_404(session, tenant, document_id)
     if doc.status in (DocumentStatus.QUEUED, DocumentStatus.PROCESSING):
-        raise HTTPException(409, f"document is already {doc.status}")
+        raise HTTPException(409, f"document is already {doc.status}")  # parsed, extracted and failed can rerun
     session.execute(
         update(Document)
         .where(Document.id == doc.id, Document.status == doc.status)
@@ -210,9 +214,36 @@ def get_parsed_document(
 ) -> ParsedDocument | PlainTextResponse:
     doc = _get_or_404(session, tenant, document_id)
     path = parsed_path(settings.storage_dir, tenant.id, doc.id)
-    if doc.status != DocumentStatus.PARSED or not path.exists():
+    if doc.status not in (DocumentStatus.PARSED, DocumentStatus.EXTRACTED) or not path.exists():
         raise HTTPException(409, f"document is {doc.status}" + (f": {doc.error}" if doc.error else ""))
     parsed = ParsedDocument.model_validate_json(path.read_text())
     if format == "text":
         return PlainTextResponse(parsed.to_text())
     return parsed
+
+
+@app.get("/api/documents/{document_id}/extraction")
+def get_extraction(document_id: str, tenant: TenantDep, session: SessionDep, settings: SettingsDep) -> Extraction:
+    doc = _get_or_404(session, tenant, document_id)
+    path = extraction_path(settings.storage_dir, tenant.id, doc.id)
+    if doc.status != DocumentStatus.EXTRACTED or not path.exists():
+        raise HTTPException(409, f"document is {doc.status}" + (f": {doc.error}" if doc.error else ""))
+    return Extraction.model_validate_json(path.read_text())
+
+
+@app.get("/api/batches")
+def get_batches(tenant: TenantDep, session: SessionDep, settings: SettingsDep) -> dict:
+    """Related documents grouped by shared batch-key values across all of the tenant's extracted documents."""
+    docs = session.scalars(
+        select(Document)
+        .where(Document.tenant_id == tenant.id, Document.status == DocumentStatus.EXTRACTED)
+        .order_by(Document.created_at)
+    ).all()
+    items = []
+    for doc in docs:
+        path = extraction_path(settings.storage_dir, tenant.id, doc.id)
+        if path.exists():
+            extraction = Extraction.model_validate_json(path.read_text())
+            items.append(BatchItem(doc.id, doc.filename, extraction.document_type, extraction.values()))
+    keys = [f.name for f in tenant_schema(tenant).fields if f.isBatchKey]
+    return segregate(items, keys)

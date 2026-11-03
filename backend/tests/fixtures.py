@@ -146,3 +146,140 @@ def workbook(path: Path) -> Path:
 def semicolon_csv(path: Path) -> Path:
     path.write_text("id;name;amount\n007;Globex;1.234,50\n008;Initech;99\n", encoding="utf-8")
     return path
+
+
+# Documents from the legacy Node sample generator (legacy/scripts/generate-samples.js), kept for parity.
+LEGACY_TEXT_SAMPLES = {
+    "po_7788.pdf": [
+        "Acme Exports Pvt Ltd",
+        "12 Industrial Estate, Andheri East, Mumbai 400069",
+        "",
+        "PURCHASE ORDER",
+        "PO No: PO-7788",
+        "Order Date: 01/05/2024",
+        "Vendor: Global Traders Inc",
+    ],
+    "invoice_001.pdf": [
+        "Acme Exports Pvt Ltd",
+        "12 Industrial Estate, Andheri East, Mumbai 400069",
+        "GSTIN: 27ABCDE1234F1Z5",
+        "",
+        "TAX INVOICE",
+        "Invoice No.: INV-2024-001",
+        "Invoice Date: 10/05/2024",
+        "PO Ref: PO-7788",
+        "Bill To: Global Traders Inc",
+        "Subtotal: 11,000.00",
+        "Grand Total: 12,500.00",
+    ],
+    "transaction_001.pdf": [
+        "HDFC Bank Ltd",
+        "ACCOUNT STATEMENT",
+        "Transaction ID: TXN-88213",
+        "Transaction Date: 15/06/2024",
+        "Debit: 450.00",
+    ],
+    "receipt_001.pdf": [
+        "Zenith Retail LLP",
+        "4 Market Street, Pune 411001",
+        "",
+        "CASH RECEIPT",
+        "Receipt No: RCPT-3341",
+        "Date: 20/06/2024",
+        "Payment Received",
+        "Amount Paid: 990.00",
+    ],
+    "invoice_orphan.pdf": [
+        "Nowhere Trading Co",
+        "9 Nowhere Lane, Nashik 422001",
+        "",
+        "COMMERCIAL INVOICE",
+        "Invoice Number: INV-2024-999",
+        "Invoice Date: 22/06/2024",
+        "Grand Total: 3,300.00",
+    ],
+    "random_note.pdf": ["Meeting notes", "Discussed quarterly planning and staffing."],
+}
+LEGACY_SCANNED_SAMPLES = {
+    "receipt_scanned.pdf": [
+        "Sunrise Stores Pvt Ltd",
+        "CASH RECEIPT",
+        "Receipt No: RCPT-7788",
+        "Date: 25/06/2024",
+        "Amount Paid: 1,499.00",
+    ],
+}
+
+
+def lines_pdf(path: Path, lines: list[str]) -> Path:
+    c = canvas.Canvas(str(path), pagesize=A4)
+    c.setFont("Helvetica", 12)
+    y = 800
+    for line in lines:
+        if line:
+            c.drawString(50, y, line)
+        y -= 18
+    c.showPage()
+    c.save()
+    return path
+
+
+def lines_scanned_pdf(path: Path, lines: list[str]) -> Path:
+    c = canvas.Canvas(str(path), pagesize=A4)
+    _draw_image(c, text_image(lines, size=30, width=1000), 40, 500, width=500)
+    c.showPage()
+    c.save()
+    return path
+
+
+def legacy_samples(directory: Path) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    for name, lines in LEGACY_TEXT_SAMPLES.items():
+        lines_pdf(directory / name, lines)
+    for name, lines in LEGACY_SCANNED_SAMPLES.items():
+        lines_scanned_pdf(directory / name, lines)
+    return directory
+
+
+def layout_invoice_pdf(path: Path) -> Path:
+    """A two-column international invoice: issuer top-left, 'Bill To' left, meta right, totals bottom-right."""
+    c = canvas.Canvas(str(path), pagesize=A4)
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(50, 800, "Nordwind Logistik GmbH")
+    c.setFont("Helvetica", 10)
+    c.drawString(50, 784, "Hafenstraße 12, 20457 Hamburg, Germany")
+    c.drawString(50, 770, "VAT No: DE 123456789")
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(400, 800, "INVOICE")
+    c.setFont("Helvetica", 10)
+    c.drawString(400, 784, "Invoice No: NW-2026-0142")
+    c.drawString(400, 770, "Invoice Date: 14 March 2026")
+    c.drawString(400, 756, "Due Date: 13/04/2026")
+    c.drawString(400, 742, "Your PO: PO-55120")
+    c.drawString(50, 720, "Bill To:")
+    c.drawString(50, 706, "Brightline Retail Ltd")
+    c.drawString(50, 692, "88 King Street, Manchester M2 4WU")
+    c.drawString(50, 678, "United Kingdom")
+    c.drawString(50, 640, "Description")
+    c.drawString(300, 640, "Qty")
+    c.drawString(360, 640, "Unit Price")
+    c.drawString(470, 640, "Amount")
+    c.drawString(50, 624, "Sea freight Hamburg - Felixstowe")
+    c.drawString(300, 624, "1")
+    c.drawString(360, 624, "1.850,00")
+    c.drawString(470, 624, "1.850,00")
+    c.drawString(50, 610, "Customs clearance")
+    c.drawString(300, 610, "2")
+    c.drawString(360, 610, "150,00")
+    c.drawString(470, 610, "300,00")
+    c.drawString(360, 580, "Subtotal")
+    c.drawString(470, 580, "EUR 2.150,00")
+    c.drawString(360, 566, "VAT 19%")
+    c.drawString(470, 566, "EUR 408,50")
+    c.drawString(360, 552, "Total Due")
+    c.drawString(470, 552, "EUR 2.558,50")
+    c.drawString(50, 520, "Payment Terms: Net 30")
+    c.drawString(50, 506, "IBAN: DE89 3704 0044 0532 0130 00")
+    c.showPage()
+    c.save()
+    return path

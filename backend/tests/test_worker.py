@@ -21,7 +21,8 @@ def test_upload_parse_and_fetch(client, make_tenant, tmp_path):
     assert worker.run(once=True) == 1
 
     meta = client.get(f"/api/documents/{doc['id']}", headers=headers).json()
-    assert meta["status"] == "parsed"
+    assert meta["status"] == "extracted"
+    assert meta["document_type"] == "Invoice"
     assert meta["page_count"] == 2
     assert meta["parsed_at"].endswith("Z")
 
@@ -82,7 +83,7 @@ def test_stale_processing_is_reclaimed(client, make_tenant, tmp_path, session):
     session.execute(update(Document).where(Document.id == doc["id"]).values(locked_at=stale))
     session.commit()
     assert worker.run(once=True) == 1
-    assert client.get(f"/api/documents/{doc['id']}", headers=headers).json()["status"] == "parsed"
+    assert client.get(f"/api/documents/{doc['id']}", headers=headers).json()["status"] == "extracted"
 
 
 def test_claim_is_exclusive(client, make_tenant, tmp_path, session, env):

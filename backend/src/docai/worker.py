@@ -16,10 +16,12 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.orm import Session
 
-from docai.db import Document, DocumentStatus, get_sessionmaker
-from docai.ingest import PARSER_VERSION, ParseError, parse_file
+from docai.db import Document, DocumentStatus, Tenant, get_sessionmaker
+from docai.ingest import PARSER_VERSION, ParsedDocument, ParseError, parse_file
+from docai.pipeline import ModeUnavailable, extract_document
 from docai.settings import Settings, get_settings
-from docai.storage import blob_path, parsed_path, write_atomic
+from docai.storage import blob_path, extraction_path, parsed_path, write_atomic
+from docai.tenants import tenant_schema
 
 log = logging.getLogger("docai.worker")
 
@@ -83,16 +85,26 @@ def process(session: Session, doc: Document, settings: Settings) -> None:
         return
 
     write_atomic(parsed_path(settings.storage_dir, doc.tenant_id, doc.id), parsed.model_dump_json())
-    _finish(
-        session,
-        doc,
-        status=DocumentStatus.PARSED,
-        error=None,
-        page_count=parsed.page_count,
-        parser_version=PARSER_VERSION,
-        parsed_at=datetime.now(UTC),
-    )
-    log.info("document %s parsed: %d page(s) in %.1fs", doc.id, parsed.page_count, time.monotonic() - started)
+    parsed_values = dict(page_count=parsed.page_count, parser_version=PARSER_VERSION, parsed_at=datetime.now(UTC))
+    status, error, document_type = _extract(session, doc, parsed, settings)
+    _finish(session, doc, status=status, error=error, document_type=document_type, **parsed_values)
+    log.info("document %s %s: %d page(s) in %.1fs", doc.id, status, parsed.page_count, time.monotonic() - started)
+
+
+def _extract(
+    session: Session, doc: Document, parsed: ParsedDocument, settings: Settings
+) -> tuple[DocumentStatus, str | None, str | None]:
+    """Extraction failures keep the parse: the document stays `parsed` with an error and can be reprocessed."""
+    tenant = session.get(Tenant, doc.tenant_id)
+    try:
+        extraction = extract_document(parsed, tenant_schema(tenant), tenant.mode)
+    except ModeUnavailable as e:
+        return DocumentStatus.PARSED, str(e), None
+    except Exception:
+        log.exception("document %s: unexpected extraction error", doc.id)
+        return DocumentStatus.PARSED, "internal error while extracting", None
+    write_atomic(extraction_path(settings.storage_dir, doc.tenant_id, doc.id), extraction.model_dump_json())
+    return DocumentStatus.EXTRACTED, None, extraction.document_type
 
 
 def run(once: bool = False, poll_interval: float = 1.0, stop: threading.Event | None = None) -> int:

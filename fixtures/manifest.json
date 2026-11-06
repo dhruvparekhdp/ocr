@@ -1,0 +1,239 @@
+{
+  "description": "Synthetic documents only. Drawn text and expected fields are the same source. No customer paperwork.",
+  "documents": [
+    {
+      "id": "invoice-text",
+      "filename": "invoice-text.pdf",
+      "render": "text",
+      "documentType": "Invoice",
+      "source": "text",
+      "lines": [
+        "Acme Exports Pvt Ltd",
+        "12 Industrial Estate, Andheri East, Mumbai 400069",
+        "GSTIN: 27ABCDE1234F1Z5",
+        "TAX INVOICE",
+        "Invoice No: INV-2024-2468",
+        "Invoice Date: 10/05/2024",
+        "PO Ref: PO-7781",
+        "Bill To: Northwind Traders LLC",
+        "Subtotal: 11,000.00",
+        "Grand Total: 12,500.00"
+      ],
+      "fields": {
+        "documentNumber": "INV-2024-2468",
+        "referenceNumber": "PO-7781",
+        "companyName": "Acme Exports Pvt Ltd",
+        "address": "12 Industrial Estate, Andheri East, Mumbai 400069",
+        "date": "10/05/2024",
+        "amount": "12,500.00"
+      }
+    },
+    {
+      "id": "po-text",
+      "filename": "po-text.pdf",
+      "render": "text",
+      "documentType": "Purchase Order",
+      "source": "text",
+      "lines": [
+        "Acme Exports Pvt Ltd",
+        "12 Industrial Estate, Andheri East, Mumbai 400069",
+        "PURCHASE ORDER",
+        "PO No: PO-7781",
+        "Order Date: 01/05/2024",
+        "Vendor: Global Traders Inc"
+      ],
+      "fields": {
+        "documentNumber": null,
+        "referenceNumber": "PO-7781",
+        "companyName": "Acme Exports Pvt Ltd",
+        "address": "12 Industrial Estate, Andheri East, Mumbai 400069",
+        "date": "01/05/2024",
+        "amount": null
+      }
+    },
+    {
+      "id": "receipt-text",
+      "filename": "receipt-text.pdf",
+      "render": "text",
+      "documentType": "Receipt",
+      "source": "text",
+      "lines": [
+        "Zenith Retail LLP",
+        "4 Market Street, Pune 411001",
+        "CASH RECEIPT",
+        "Receipt No: REC-3341",
+        "Date: 20/06/2024",
+        "Payment Received",
+        "Amount Paid: 990.00"
+      ],
+      "fields": {
+        "documentNumber": "REC-3341",
+        "referenceNumber": null,
+        "companyName": "Zenith Retail LLP",
+        "address": "4 Market Street, Pune 411001",
+        "date": "20/06/2024",
+        "amount": "990.00"
+      }
+    },
+    {
+      "id": "transaction-text",
+      "filename": "transaction-text.pdf",
+      "render": "text",
+      "documentType": "Transaction Record",
+      "source": "text",
+      "lines": [
+        "Harbor Bank Ltd",
+        "42 Harbor Road, Bengaluru 560001",
+        "ACCOUNT STATEMENT",
+        "Account Number: 24681357",
+        "Transaction ID: TXN-8824",
+        "Transaction Date: 15/06/2024",
+        "Debit Credit Balance",
+        "02/06/2024 Card purchase 120.00 4880.00",
+        "09/06/2024 Transfer in 500.00 5380.00",
+        "15/06/2024 Vendor payment 450.00 4930.00",
+        "Total Amount: 450.00"
+      ],
+      "textIncludes": [
+        "Card purchase",
+        "120.00",
+        "Transfer in",
+        "500.00",
+        "Vendor payment",
+        "4930.00"
+      ],
+      "fields": {
+        "documentNumber": "TXN-8824",
+        "referenceNumber": null,
+        "companyName": "Harbor Bank Ltd",
+        "address": "42 Harbor Road, Bengaluru 560001",
+        "date": "15/06/2024",
+        "amount": "450.00"
+      }
+    },
+    {
+      "id": "invoice-scan",
+      "filename": "invoice-scan.pdf",
+      "image": "invoice-scan.png",
+      "render": "scan",
+      "documentType": "Invoice",
+      "source": "ocr",
+      "lines": [
+        "Acme Exports Pvt Ltd",
+        "12 Industrial Estate Mumbai 400069",
+        "TAX INVOICE",
+        "Invoice No: INV-2468",
+        "Invoice Date: 10/05/2024",
+        "PO Ref: PO-2468",
+        "Grand Total: 12500.00"
+      ],
+      "fields": {
+        "documentNumber": "INV-2468",
+        "referenceNumber": "PO-2468",
+        "companyName": "Acme Exports Pvt Ltd",
+        "address": "12 Industrial Estate Mumbai 400069",
+        "date": "10/05/2024",
+        "amount": "12500.00"
+      }
+    },
+    {
+      "id": "po-scan",
+      "filename": "po-scan.pdf",
+      "image": "po-scan.png",
+      "render": "scan",
+      "documentType": "Purchase Order",
+      "source": "ocr",
+      "lines": [
+        "Acme Exports Pvt Ltd",
+        "12 Industrial Estate Mumbai 400069",
+        "PURCHASE ORDER",
+        "PO No: PO-2468",
+        "Order Date: 01/05/2024",
+        "Vendor: Global Traders Inc"
+      ],
+      "fields": {
+        "documentNumber": null,
+        "referenceNumber": "PO-2468",
+        "companyName": "Acme Exports Pvt Ltd",
+        "address": "12 Industrial Estate Mumbai 400069",
+        "date": "01/05/2024",
+        "amount": null
+      }
+    },
+    {
+      "id": "receipt-scan",
+      "filename": "receipt-scan.pdf",
+      "image": "receipt-scan.png",
+      "render": "scan",
+      "documentType": "Receipt",
+      "source": "ocr",
+      "lines": [
+        "Zenith Retail LLP",
+        "4 Market Street Pune 411001",
+        "CASH RECEIPT",
+        "Receipt No: REC-4343",
+        "Date: 20/06/2024",
+        "Payment Received",
+        "Amount Paid: 1499.00"
+      ],
+      "fields": {
+        "documentNumber": "REC-4343",
+        "referenceNumber": null,
+        "companyName": "Zenith Retail LLP",
+        "address": "4 Market Street Pune 411001",
+        "date": "20/06/2024",
+        "amount": "1499.00"
+      }
+    },
+    {
+      "id": "transaction-scan",
+      "filename": "transaction-scan.pdf",
+      "image": "transaction-scan.png",
+      "render": "scan",
+      "documentType": "Transaction Record",
+      "source": "ocr",
+      "lines": [
+        "Harbor Bank Ltd",
+        "42 Harbor Road Bengaluru 560001",
+        "ACCOUNT STATEMENT",
+        "Account Number: 24681357",
+        "Transaction ID: TXN-4343",
+        "Transaction Date: 15/06/2024",
+        "Debit",
+        "Credit",
+        "Balance",
+        "02/06/2024 Card purchase 120.00",
+        "09/06/2024 Transfer in 500.00",
+        "15/06/2024 Vendor payment 450.00",
+        "Total Amount: 450.00"
+      ],
+      "textIncludes": [
+        "Card purchase",
+        "120.00",
+        "Transfer in",
+        "500.00",
+        "Vendor payment"
+      ],
+      "fields": {
+        "documentNumber": "TXN-4343",
+        "referenceNumber": null,
+        "companyName": "Harbor Bank Ltd",
+        "address": "42 Harbor Road Bengaluru 560001",
+        "date": "15/06/2024",
+        "amount": "450.00"
+      }
+    }
+  ],
+  "expectedBatches": [
+    {
+      "documentNumber": "INV-2024-2468",
+      "referenceNumber": "PO-7781",
+      "files": ["invoice-text.pdf", "po-text.pdf"]
+    },
+    {
+      "documentNumber": "INV-2468",
+      "referenceNumber": "PO-2468",
+      "files": ["invoice-scan.pdf", "po-scan.pdf"]
+    }
+  ]
+}

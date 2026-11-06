@@ -137,10 +137,44 @@ fields, and an **OCR** tag on any document whose text came from OCR. Branding
 and the field/type list come from `GET /api/config`, so the UI reflects
 whatever schema is active.
 
-### Smoke test
+### Extract service
 
 ```bash
-npm test   # generates sample PDFs (including one scanned/OCR PDF) and runs the pipeline
+# OCR_SERVICE_TOKEN must be set or POST /v1/extract returns 503.
+OCR_SERVICE_TOKEN=replace-me npm run service
+# http://127.0.0.1:8080   (OCR_SERVICE_HOST / OCR_SERVICE_PORT)
+```
+
+`GET /v1/health` returns `{ "status": "ok" }` and does not require a token.
+
+`POST /v1/extract` is multipart, field name `file`, optional text field `doc_type`. Header `Authorization: Bearer <token>`. Accepted types are PDF, PNG, JPEG, and TIFF (magic bytes and extension must agree). Default limits are 20 MB and 20 pages (`OCR_SERVICE_MAX_BYTES`, `OCR_SERVICE_MAX_PAGES`). The process listens on `127.0.0.1` unless `OCR_SERVICE_HOST` is set. File bytes stay in memory. They are written to disk only when `OCR_SERVICE_DEBUG_STORE=1`.
+
+```jsonc
+{
+  "doc_type": "Invoice",
+  "doc_type_confidence": 0.5,
+  "pages": [{ "page": 1, "text": "..." }],
+  "fields": [
+    {
+      "name": "documentNumber",
+      "value": "INV-2024-2468",
+      "confidence": 0.9,
+      "page": 1,
+      "bbox": [72.0, 140.2, 210.5, 152.2],
+      "method": "labeledId"
+    }
+  ],
+  "warnings": []
+}
+```
+
+`doc_type` and field names come from `config/schema.json`. `doc_type_confidence` is the fraction of that type's keyword weight that matched, or `1` when a known `doc_type` hint was applied. Field `confidence` is a fixed heuristic score (labeled match vs fallback), capped by the OCR word confidence when the value is found in recognized words. `method` is the schema extractor name. There is no LLM call. PDF boxes are top-left origin in PDF points. Image boxes are top-left origin in the source image's pixels (TIFF is not preprocessed, because decoding some TIFFs in canvas crashes the process).
+
+### Tests
+
+```bash
+npm test         # service tests against fixtures/manifest.json
+npm run test:smoke   # old sample generator + unasserted CLI run
 ```
 
 ## Output shape
@@ -182,6 +216,9 @@ npm test   # generates sample PDFs (including one scanned/OCR PDF) and runs the 
 | `analyze.js` | Classify + extract: text → `{ documentType, fields }`. |
 | `index.js` | Orchestration: folder/buffer processing with bounded concurrency, union-find batching, CLI entry point. |
 | `server.js` | Express server: web UI, `GET /api/config`, `POST /api/classify` (in-memory). |
+| `service.js` | Authenticated extract service: `GET /v1/health`, `POST /v1/extract`. |
+| `extractDocument.js` / `pageIngest.js` | Per-page text or OCR, field values, confidence, and boxes for that service. |
+| `fixtures/manifest.json` | Synthetic invoices, receipts, purchase orders, and transaction lists the service tests assert. |
 | `public/index.html` | Bulk-upload UI — dynamic fields/branding, OCR tags. |
 | `scripts/generate-samples.js` | Dev-only sample generator (text PDFs + one scanned/OCR PDF). |
 
@@ -238,16 +275,11 @@ doesn't. In rough priority order:
   exactly where label→value proximity heuristics get weakest.
 
 **Pipeline scope.**
-- **Text-based and scanned PDFs only.** Not other formats (images on their
-  own, DOCX, email) — though the OCR path would extend to standalone images
-  with little work.
+- **The CLI and bulk UI still accept PDFs only.** `POST /v1/extract` also accepts PNG, JPEG, and TIFF. DOCX and email are still out of scope. TIFF skips image preprocessing (see `docs/DECISIONS.md`).
 - **Mixed PDFs** (some pages real text, some scanned) take the text path off
   the first pages and may skip OCR on the image pages — the text/scanned
   decision is currently whole-document, not per-page.
-- **No confidence scores.** Every field is returned as a value or `null`, with
-  no indication of how sure the heuristic is. For a review workflow, per-field
-  confidence (and surfacing low-confidence values for a human to check) would
-  be a valuable addition.
+- **The CLI and batch report still have no confidence or boxes.** `POST /v1/extract` adds a deterministic heuristic confidence and a box when the value can be located in the page. That score is not a calibrated probability. The batch JSON written by `node index.js` is unchanged: value or `null` only.
 - **No de-duplication or multi-currency parsing.** Amounts keep their printed
   formatting; currency is not separated out into its own field.
 

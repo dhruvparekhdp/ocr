@@ -37,23 +37,49 @@ const buildClassificationRules = () => {
 };
 
 /**
+ * Classifies collapsed text and reports how much of the winning type's
+ * keyword weight actually matched. Confidence is that fraction in [0, 1].
+ * Unknown (no hits) is 0. Ties keep the earlier schema type.
+ *
+ * @param {string} collapsedText
+ * @returns {{ documentType: string, confidence: number }}
+ */
+const scoreCollapsed = (collapsedText) => {
+  let best = UNKNOWN_TYPE;
+  let bestScore = 0;
+  let bestPossible = 0;
+  for (const rule of buildClassificationRules()) {
+    const hits = rule.keywords.reduce((sum, re) => (re.test(collapsedText) ? sum + 1 : sum), 0);
+    const score = hits * rule.weight;
+    const possible = rule.keywords.length * rule.weight;
+    if (score > bestScore) {
+      bestScore = score;
+      best = rule.type;
+      bestPossible = possible;
+    }
+  }
+  return {
+    documentType: best,
+    confidence: bestPossible > 0 ? bestScore / bestPossible : 0,
+  };
+};
+
+/**
  * Classifies raw text into one of the configured document types.
  *
  * @param {string} collapsedText Whitespace-collapsed single-line text.
  * @returns {string} A document type name (or "Unknown").
  */
-const classify = (collapsedText) => {
-  let best = UNKNOWN_TYPE;
-  let bestScore = 0;
-  for (const rule of buildClassificationRules()) {
-    const score = rule.keywords.reduce((sum, re) => (re.test(collapsedText) ? sum + rule.weight : sum), 0);
-    if (score > bestScore) {
-      bestScore = score;
-      best = rule.type;
-    }
-  }
-  return best;
-};
+const classify = (collapsedText) => scoreCollapsed(collapsedText).documentType;
+
+/**
+ * Same classifier as {@link analyzeText}, plus a deterministic confidence.
+ * The service API uses this. The batch CLI still uses {@link analyzeText}.
+ *
+ * @param {string} rawText
+ * @returns {{ documentType: string, confidence: number }}
+ */
+export const scoreDocument = (rawText) => scoreCollapsed(rawText.replace(/\s+/g, ' '));
 
 /**
  * Classifies a document and extracts its applicable fields.

@@ -114,3 +114,7 @@ added following an explicit instruction: keep project context, decisions,
 and rationale in the codebase itself rather than only in conversation
 history, so a future session (with no memory of these conversations) can
 reconstruct the full picture from the repo alone.
+
+## 8. Authenticated extract service
+
+`service.js` adds `GET /v1/health` and `POST /v1/extract` on the existing heuristic pipeline: bearer token, loopback bind, PDF/PNG/JPEG/TIFF limits, page cap, and no upload persistence unless debug store is explicitly on. The response adds deterministic confidence, page, bbox, and extractor `method`. There is still no LLM. Tests in `test/extract-service.test.js` cover each schema document type using `fixtures/manifest.json`, plus auth and the limits. See `DECISIONS.md`.

@@ -58,4 +58,4 @@ The audit document describes the unauthenticated upload server and recommends a 
 
 ## Rollback
 
-The branch only adds two markdown files. To drop the audit, delete `jarvis/AUD-4` or revert commits `333080e` (audit) and the handoff commit on top of it. `main` was not modified. No migration, service, or config rollback is required.
+The branch only adds markdown under `docs/audit/` and `docs/handoff/`. To drop the audit, delete `jarvis/AUD-4` or revert the commits on that branch (audit is `333080e`). `main` was not modified. No migration, service, or config rollback is required.

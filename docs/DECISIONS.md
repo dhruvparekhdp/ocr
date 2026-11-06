@@ -129,6 +129,20 @@ union-find over shared identifiers generalizes to any set of document types
 and relationships the schema defines, without the batching code needing to
 know what those types mean.
 
+## Page banners do not count as embedded text
+
+**Decision:** `substantiveAlnum` strips pdf-parse lines matching `-- <n> of <N> --` before comparing with the 25-character OCR floor.
+
+**Why:** A 7-page image-only PDF has no document text, but pdf-parse still appends one banner per page. Measured on 6 Nov 2026: those seven banners contain 28 alphanumeric characters (`1 of 7` and the same for pages 2–7). That cleared the floor, so the file was returned as `source: "text"` and never OCR'd. The banners are still left in the text when a PDF really does have a text layer. Only the decision uses the stripped count.
+
+## Batch JSONL resumes by content hash
+
+**Decision:** `batch.js` writes one JSON object per file. Resume skips a file only when the latest record for its sha256 has `status: "ok"`. An error line is not "done", so the same bytes are tried again. `--workers` bounds in-process extraction. It does not start extra Tesseract engines. `ocr.js` still runs recognize calls one at a time.
+
+**Why a hash and not a path:** renaming a finished PDF, or dropping a byte-identical copy in the folder, should not extract it again. A failed file keeps its hash, and the next run appends a new line. The latest line for that hash wins. A half-written last line is ignored so a killed process can continue.
+
+**Why the low-confidence list is separate from the field value:** the folder report still stores the printed string. The summary adds a deterministic label-vs-fallback score so a reviewer can see fallback amounts and weak OCR fields. It is not a calibrated probability, and it is not written back over the value.
+
 ## Schema-driven, not hardcoded, document types and fields
 
 **Decision:** `config/schema.json` is the single source of truth for

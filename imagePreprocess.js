@@ -47,9 +47,9 @@
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 
 /** Images narrower than this are upscaled — a proxy for "likely too low-resolution for good OCR". */
-const UPSCALE_WIDTH_THRESHOLD = 1500;
+export const UPSCALE_WIDTH_THRESHOLD = 1500;
 /** Upscale factor applied when below the threshold. 2x roughly doubles effective DPI. */
-const UPSCALE_FACTOR = 2;
+export const UPSCALE_FACTOR = 2;
 
 /**
  * A 3x3 median filter: each pixel becomes the median of itself and its 8

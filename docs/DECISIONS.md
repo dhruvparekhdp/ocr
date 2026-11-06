@@ -129,6 +129,18 @@ union-find over shared identifiers generalizes to any set of document types
 and relationships the schema defines, without the batching code needing to
 know what those types mean.
 
+## Extract service keeps heuristics and adds boxes without an LLM
+
+**Decision:** `service.js` is a separate process from the bulk-upload UI. `POST /v1/extract` reuses `config/schema.json` and `extractors.js`. Classification confidence is the fraction of the winning type's keyword weight that hit. Field confidence is a fixed score for a labeled match versus a fallback, then capped by the mean Tesseract word confidence when the value is found in OCR tokens. `method` is the extractor name. Nothing in this path calls an LLM, so `method` is never `"llm"`. A `doc_type` hint, when it names a real schema type other than Unknown, selects that type and sets confidence to 1.
+
+**Why a second server:** the upload UI is unauthenticated and binds every interface. The service requires a bearer token, binds `127.0.0.1` unless `OCR_SERVICE_HOST` is set, and caps size and pages. Health stays open and returns only `{ "status": "ok" }`.
+
+**Why uploads are not stored:** multer memory storage. Disk writes happen only when `OCR_SERVICE_DEBUG_STORE=1`, under `OCR_SERVICE_DEBUG_DIR`, with a random filename. The client filename is not used as a path.
+
+**Why TIFF skips preprocessing:** `@napi-rs/canvas` `loadImage` segfaulted on a valid uncompressed RGB TIFF in testing (6 Nov 2026). Tesseract.js read that same TIFF. PNG and JPEG still go through `preprocessForOcr`.
+
+**Boxes:** pdf-parse's public text result has no positions. The service reads text items from the `PDFParse` document already loaded in that process, and maps OCR word boxes back by the screenshot scale and the preprocess upscale. PDF coordinates are top-left PDF points. Image coordinates are source pixels.
+
 ## Schema-driven, not hardcoded, document types and fields
 
 **Decision:** `config/schema.json` is the single source of truth for

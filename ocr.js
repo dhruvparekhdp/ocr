@@ -15,12 +15,10 @@
  */
 
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { createWorker } from 'tesseract.js';
 
 const require = createRequire(import.meta.url);
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /**
  * Resolves the directory holding eng.traineddata.gz. tesseract.js's `langPath`
@@ -74,16 +72,60 @@ let recognizeChain = Promise.resolve();
  * @param {Buffer} imageBuffer
  * @returns {Promise<string>} Recognized text.
  */
-export const ocrImage = (imageBuffer) => {
+const recognize = (imageBuffer) => {
   const run = async () => {
     const worker = await getWorker();
-    const { data } = await worker.recognize(imageBuffer);
-    return data.text;
+    // blocks are off by default and are the only place word boxes live.
+    const { data } = await worker.recognize(imageBuffer, {}, { text: true, blocks: true });
+    return data;
   };
   // Attach to the chain, but don't let one failure poison later calls.
   const result = recognizeChain.then(run, run);
-  recognizeChain = result.catch(() => {});
+  recognizeChain = result.then(() => {}, () => {});
   return result;
+};
+
+/**
+ * @param {import('tesseract.js').Page} data
+ * @returns {Array<{ text: string, confidence: number, bbox: number[] }>}
+ */
+const wordsFromPage = (data) => {
+  const words = [];
+  for (const block of data.blocks || []) {
+    for (const paragraph of block.paragraphs || []) {
+      for (const line of paragraph.lines || []) {
+        for (const word of line.words || []) {
+          const text = word.text?.trim();
+          if (!text || !word.bbox) continue;
+          words.push({
+            text,
+            confidence: Math.max(0, Math.min(1, (word.confidence || 0) / 100)),
+            bbox: [word.bbox.x0, word.bbox.y0, word.bbox.x1, word.bbox.y1],
+          });
+        }
+      }
+    }
+  }
+  return words;
+};
+
+export const ocrImage = async (imageBuffer) => (await recognize(imageBuffer)).text || '';
+
+/**
+ * Same recognizer as {@link ocrImage}, keeping word boxes and confidences.
+ * Boxes are in the pixel space of the buffer passed in (already preprocessed
+ * when the caller ran preprocessForOcr).
+ *
+ * @param {Buffer} imageBuffer
+ * @returns {Promise<{ text: string, confidence: number, words: Array<{ text: string, confidence: number, bbox: number[] }> }>}
+ */
+export const ocrImageDetailed = async (imageBuffer) => {
+  const data = await recognize(imageBuffer);
+  return {
+    text: data.text || '',
+    confidence: Math.max(0, Math.min(1, (data.confidence || 0) / 100)),
+    words: wordsFromPage(data),
+  };
 };
 
 /**

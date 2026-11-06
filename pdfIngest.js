@@ -35,10 +35,10 @@ import { ocrImage } from './ocr.js';
  * deliberately low so a genuinely tiny (but real) text PDF isn't needlessly
  * OCR'd.
  */
-const MIN_TEXT_CHARS = 25;
+export const MIN_TEXT_CHARS = 25;
 
 /** Higher scale → sharper render → better OCR accuracy, at more time/memory. 2 is a good balance. */
-const OCR_RENDER_SCALE = 2;
+export const OCR_RENDER_SCALE = 2;
 
 const countAlnum = (text) => (text.match(/[A-Za-z0-9]/g) || []).length;
 

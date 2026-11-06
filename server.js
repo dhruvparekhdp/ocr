@@ -75,6 +75,7 @@ app.post('/api/classify', upload.array('documents', MAX_FILES), async (req, res)
         failed: errors.length,
         batches: Object.keys(batches).length,
         unbatchedGroups: Object.keys(unbatched).length,
+        warningCount: analyzedDocs.reduce((count, doc) => count + (doc.warnings?.length || 0), 0),
         durationMs: Date.now() - started,
       },
       batches,

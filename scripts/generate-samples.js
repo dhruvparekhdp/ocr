@@ -21,24 +21,19 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import PDFDocument from 'pdfkit';
 import { createCanvas } from '@napi-rs/canvas';
+import { renderTextPdf } from './textPdf.js';
 
 const outDir = path.resolve(process.argv[2] ?? './sample_pdfs');
 fs.mkdirSync(outDir, { recursive: true });
 
-/** A normal text PDF (has an embedded text layer). */
-const writeTextPdf = (fileName, lines) =>
-  new Promise((resolve, reject) => {
-    const doc = new PDFDocument();
-    const stream = fs.createWriteStream(path.join(outDir, fileName));
-    doc.pipe(stream);
-    doc.fontSize(12);
-    for (const line of lines) doc.text(line);
-    doc.end();
-    stream.on('finish', resolve);
-    stream.on('error', reject);
-  });
+/** A normal text PDF (has an embedded text layer). `wide` keeps long GST lines intact. */
+const writeTextPdf = async (fileName, lines, options) => {
+  const buffer = await renderTextPdf(lines, options);
+  await fs.promises.writeFile(path.join(outDir, fileName), buffer);
+};
 
 /**
  * An image-only PDF: the text is rasterized onto a canvas and embedded as an
@@ -144,6 +139,17 @@ const scannedSamples = [
 await Promise.all(textSamples.map(([name, lines]) => writeTextPdf(name, lines)));
 await Promise.all(scannedSamples.map(([name, lines]) => writeScannedPdf(name, lines)));
 
+// Synthetic GST invoices live in fixtures/gst-invoices.json so the unit tests
+// and these PDFs cannot drift apart. They are not customer documents.
+const gstFixtures = JSON.parse(
+  fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'gst-invoices.json'), 'utf8'),
+);
+await Promise.all(
+  gstFixtures.documents
+    .filter((doc) => doc.filename)
+    .map((doc) => writeTextPdf(doc.filename, doc.lines, { wide: true })),
+);
+
 console.log(
-  `Generated ${textSamples.length} text PDFs + ${scannedSamples.length} scanned PDF (OCR) in ${outDir}`,
+  `Generated ${textSamples.length} text PDFs + ${scannedSamples.length} scanned PDF (OCR) + ${gstFixtures.documents.length} GST invoices in ${outDir}`,
 );

@@ -1,0 +1,180 @@
+{
+  "description": "Synthetic GST invoices only. Numbers are made up. No customer paperwork.",
+  "documents": [
+    {
+      "id": "intra-valid",
+      "filename": "gst_intra_valid.pdf",
+      "lines": [
+        "Acme Exports Pvt Ltd",
+        "12 Industrial Estate, Andheri East, Mumbai 400069",
+        "GSTIN: 27ABCCE1234F1Z2",
+        "PAN: ABCCE1234F",
+        "TAX INVOICE",
+        "Invoice No: INV-2024-2468",
+        "Invoice Date: 10/05/2024",
+        "Place of Supply: Maharashtra",
+        "HSN/SAC: 84713010, 998314",
+        "Item 1 HSN: 84713010 Taxable: 10,000.00 CGST: 900.00 SGST: 900.00 IGST: 0.00 Line Total: 11,800.00",
+        "Item 2 HSN: 998314 Taxable: 2,000.00 CGST: 180.00 SGST: 180.00 IGST: 0.00 Line Total: 2,360.00",
+        "Taxable Value: 12,000.00",
+        "CGST: 1,080.00",
+        "SGST: 1,080.00",
+        "IGST: 0.00",
+        "Grand Total: 14,160.00"
+      ],
+      "fields": {
+        "documentNumber": "INV-2024-2468",
+        "gstin": "27ABCCE1234F1Z2",
+        "pan": "ABCCE1234F",
+        "hsnSac": "84713010, 998314",
+        "taxableValue": "12,000.00",
+        "cgst": "1,080.00",
+        "sgst": "1,080.00",
+        "igst": "0.00",
+        "amount": "14,160.00",
+        "date": "10/05/2024",
+        "placeOfSupply": "Maharashtra"
+      },
+      "warningCodes": []
+    },
+    {
+      "id": "inter-valid",
+      "filename": "gst_inter_valid.pdf",
+      "lines": [
+        "Acme Exports Pvt Ltd",
+        "12 Industrial Estate, Andheri East, Mumbai 400069",
+        "GSTIN: 27ABCCE1234F1Z2",
+        "PAN: ABCCE1234F",
+        "TAX INVOICE",
+        "Invoice No: INV-2024-3001",
+        "Invoice Date: 02/06/2024",
+        "Place of Supply: Karnataka",
+        "HSN/SAC: 84713010",
+        "Item 1 HSN: 84713010 Taxable: 10,000.00 CGST: 0.00 SGST: 0.00 IGST: 1,800.00 Line Total: 11,800.00",
+        "Taxable Value: 10,000.00",
+        "CGST: 0.00",
+        "SGST: 0.00",
+        "IGST: 1,800.00",
+        "Grand Total: 11,800.00"
+      ],
+      "fields": {
+        "documentNumber": "INV-2024-3001",
+        "gstin": "27ABCCE1234F1Z2",
+        "pan": "ABCCE1234F",
+        "hsnSac": "84713010",
+        "taxableValue": "10,000.00",
+        "cgst": "0.00",
+        "sgst": "0.00",
+        "igst": "1,800.00",
+        "amount": "11,800.00",
+        "date": "02/06/2024",
+        "placeOfSupply": "Karnataka"
+      },
+      "warningCodes": []
+    },
+    {
+      "id": "bad-checksum",
+      "filename": "gst_bad_checksum.pdf",
+      "lines": [
+        "Acme Exports Pvt Ltd",
+        "GSTIN: 27ABCCE1234F1Z5",
+        "PAN: ABCCE1234F",
+        "TAX INVOICE",
+        "Invoice No: INV-2024-2469",
+        "Invoice Date: 10/05/2024",
+        "Place of Supply: Maharashtra",
+        "HSN/SAC: 84713010",
+        "Item 1 HSN: 84713010 Taxable: 10,000.00 CGST: 900.00 SGST: 900.00 IGST: 0.00 Line Total: 11,800.00",
+        "Taxable Value: 10,000.00",
+        "CGST: 900.00",
+        "SGST: 900.00",
+        "IGST: 0.00",
+        "Grand Total: 11,800.00"
+      ],
+      "fields": {
+        "gstin": "27ABCCE1234F1Z5",
+        "amount": "11,800.00"
+      },
+      "warningCodes": ["gstin_checksum"]
+    },
+    {
+      "id": "bad-pan-and-date",
+      "filename": "gst_bad_pan_date.pdf",
+      "lines": [
+        "Acme Exports Pvt Ltd",
+        "GSTIN: 27ABCCE1234F1Z2",
+        "PAN: ABCCE12345",
+        "TAX INVOICE",
+        "Invoice No: INV-2024-2470",
+        "Invoice Date: 31/02/2024",
+        "Place of Supply: Maharashtra",
+        "HSN/SAC: 84713010",
+        "Item 1 HSN: 84713010 Taxable: 1,000.00 CGST: 90.00 SGST: 90.00 IGST: 0.00 Line Total: 1,180.00",
+        "Taxable Value: 1,000.00",
+        "CGST: 90.00",
+        "SGST: 90.00",
+        "IGST: 0.00",
+        "Grand Total: 1,180.00"
+      ],
+      "fields": {
+        "pan": "ABCCE12345",
+        "date": "31/02/2024",
+        "gstin": "27ABCCE1234F1Z2"
+      },
+      "warningCodes": ["pan_format", "pan_gstin_mismatch", "invoice_date_invalid"]
+    },
+    {
+      "id": "bad-hsn-and-total",
+      "filename": "gst_bad_total.pdf",
+      "lines": [
+        "Acme Exports Pvt Ltd",
+        "GSTIN: 27ABCCE1234F1Z2",
+        "PAN: ABCCE1234F",
+        "TAX INVOICE",
+        "Invoice No: INV-2024-2471",
+        "Invoice Date: 10/05/2024",
+        "Place of Supply: 27",
+        "HSN/SAC: 12AB, 84713010",
+        "Item 1 HSN: 84713010 Taxable: 10,000.00 CGST: 900.00 SGST: 900.00 IGST: 0.00 Line Total: 11,800.00",
+        "Taxable Value: 10,000.00",
+        "CGST: 900.00",
+        "SGST: 900.00",
+        "IGST: 0.00",
+        "Grand Total: 99,999.00"
+      ],
+      "fields": {
+        "hsnSac": "12AB, 84713010",
+        "amount": "99,999.00",
+        "placeOfSupply": "27"
+      },
+      "warningCodes": ["hsn_format", "invoice_total_mismatch", "line_total_mismatch"]
+    },
+    {
+      "id": "tax-split-conflict",
+      "filename": "gst_tax_conflict.pdf",
+      "lines": [
+        "Acme Exports Pvt Ltd",
+        "GSTIN: 27ABCCE1234F1Z2",
+        "PAN: ABCCE1234F",
+        "TAX INVOICE",
+        "Invoice No: INV-2024-4099",
+        "Invoice Date: 11/07/2024",
+        "Place of Supply: Maharashtra",
+        "HSN/SAC: 998314",
+        "Item 1 HSN: 998314 Taxable: 1,000.00 CGST: 90.00 SGST: 90.00 IGST: 180.00 Line Total: 1,360.00",
+        "Taxable Value: 1,000.00",
+        "CGST: 90.00",
+        "SGST: 90.00",
+        "IGST: 180.00",
+        "Grand Total: 1,360.00"
+      ],
+      "fields": {
+        "cgst": "90.00",
+        "sgst": "90.00",
+        "igst": "180.00",
+        "amount": "1,360.00"
+      },
+      "warningCodes": ["tax_split_conflict"]
+    }
+  ]
+}

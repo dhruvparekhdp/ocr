@@ -7,7 +7,8 @@
       "name": "Invoice",
       "description": "Commercial invoices, tax invoices, bills — a request for payment from seller to buyer.",
       "keywords": ["Tax Invoice", "Commercial Invoice", "Invoice To", "Bill To", "Total Due", "Amount Due", "Invoice No", "GSTIN"],
-      "keywordWeight": 5
+      "keywordWeight": 5,
+      "validate": "indianGst"
     },
     {
       "name": "Purchase Order",
@@ -41,7 +42,8 @@
       "extractor": "labeledId",
       "labels": ["Invoice No", "Invoice Number", "Inv No", "Inv #", "Receipt No", "Receipt Number", "Transaction ID", "Transaction No", "Bill No", "Reference No", "Ref No"],
       "appliesTo": ["Invoice", "Transaction Record", "Receipt"],
-      "isBatchKey": true
+      "isBatchKey": true,
+      "role": "invoiceNumber"
     },
     {
       "name": "referenceNumber",
@@ -71,7 +73,8 @@
       "extractor": "date",
       "labels": ["Invoice Date", "Transaction Date", "Order Date", "Receipt Date", "Date"],
       "appliesTo": ["Invoice", "Purchase Order", "Transaction Record", "Receipt"],
-      "isBatchKey": false
+      "isBatchKey": false,
+      "role": "invoiceDate"
     },
     {
       "name": "amount",
@@ -79,7 +82,88 @@
       "extractor": "amount",
       "labels": ["Grand Total", "Total Due", "Amount Due", "Amount Paid", "Total Amount", "Net Payable", "Total"],
       "appliesTo": ["Invoice", "Transaction Record", "Receipt"],
-      "isBatchKey": false
+      "isBatchKey": false,
+      "role": "total"
+    },
+    {
+      "name": "gstin",
+      "description": "15-character GST identification number, kept as printed. Checksum failures are warnings.",
+      "extractor": "gstin",
+      "labels": ["GSTIN/UIN", "GSTIN", "GST No"],
+      "appliesTo": ["Invoice"],
+      "isBatchKey": false,
+      "role": "gstin"
+    },
+    {
+      "name": "pan",
+      "description": "Permanent account number. A labeled PAN wins. Otherwise the PAN embedded in a GSTIN-shaped token is used. A mismatch is a warning.",
+      "extractor": "pan",
+      "labels": ["PAN No", "PAN", "Permanent Account Number"],
+      "appliesTo": ["Invoice"],
+      "isBatchKey": false,
+      "role": "pan"
+    },
+    {
+      "name": "hsnSac",
+      "description": "HSN or SAC codes as printed, including codes that are not 4, 6, or 8 digits.",
+      "extractor": "hsnSac",
+      "labels": ["HSN/SAC", "HSN Code", "HSN", "SAC Code", "SAC"],
+      "appliesTo": ["Invoice"],
+      "isBatchKey": false,
+      "role": "hsnSac"
+    },
+    {
+      "name": "taxableValue",
+      "description": "Taxable value before GST. No fallback to the largest number in the document.",
+      "extractor": "labeledAmount",
+      "labels": ["Taxable Value", "Taxable Amount"],
+      "appliesTo": ["Invoice"],
+      "isBatchKey": false,
+      "role": "taxableValue"
+    },
+    {
+      "name": "cgst",
+      "description": "Central GST amount as printed.",
+      "extractor": "labeledAmount",
+      "labels": ["CGST"],
+      "appliesTo": ["Invoice"],
+      "isBatchKey": false,
+      "role": "cgst"
+    },
+    {
+      "name": "sgst",
+      "description": "State GST, or UTGST where the supply is in a union territory. Both are the local half of an intra-state split.",
+      "extractor": "labeledAmount",
+      "labels": ["UTGST", "SGST"],
+      "appliesTo": ["Invoice"],
+      "isBatchKey": false,
+      "role": "sgst"
+    },
+    {
+      "name": "igst",
+      "description": "Integrated GST amount as printed.",
+      "extractor": "labeledAmount",
+      "labels": ["IGST"],
+      "appliesTo": ["Invoice"],
+      "isBatchKey": false,
+      "role": "igst"
+    },
+    {
+      "name": "placeOfSupply",
+      "description": "Place of supply as printed (state name or GST state code).",
+      "extractor": "placeOfSupply",
+      "labels": ["Place of Supply"],
+      "appliesTo": ["Invoice"],
+      "isBatchKey": false,
+      "role": "placeOfSupply"
+    },
+    {
+      "name": "lineItems",
+      "description": "Invoice lines that contain a line total, joined as printed. Used to compare line sums with the invoice total.",
+      "extractor": "gstLines",
+      "appliesTo": ["Invoice"],
+      "isBatchKey": false,
+      "role": "lineItems"
     }
   ]
 }

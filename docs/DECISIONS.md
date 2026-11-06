@@ -129,6 +129,20 @@ union-find over shared identifiers generalizes to any set of document types
 and relationships the schema defines, without the batching code needing to
 know what those types mean.
 
+## GST failures are warnings, not corrected values
+
+**Decision:** Invoice in `config/schema.json` sets `"validate": "indianGst"`. `gstValidate.js` checks GSTIN (15-character shape plus the modulus-36 check character), PAN shape, invoice number, invoice date, HSN/SAC (4, 6, or 8 digits), place of supply, and the money cross-checks: CGST against SGST, CGST/SGST against IGST when place of supply and the GSTIN state disagree, taxable value plus the three taxes against the invoice total, and parsed line totals against that same total. The gap allowed before a money warning is one rupee. Every failure is a `{ code, message }` warning. The extracted string stays as printed.
+
+**Why not fix them in place:** A checksum or a total that does not add up is evidence, not a typo we are allowed to overwrite. Replacing `99,999.00` with the sum of the lines would hide the document the user actually uploaded. Callers that only read `fields` still see the printed numbers. `warnings` is additive.
+
+**Why labeled tax amounts do not fall back to the largest number:** The invoice total extractor does that, because a total is often the biggest figure. Doing the same for CGST would copy the grand total into the tax field whenever the label was missed. `labeledAmount` returns null instead.
+
+**Why a labeled PAN wins over the PAN inside the GSTIN:** Many invoices print both. If they disagree, both are kept and `pan_gstin_mismatch` is raised. The embedded PAN is used only when no PAN label is present.
+
+**Why validation stays quiet without a GST signal:** A document type flagged `indianGst` may still be a non-GST invoice (the sample commercial invoice has no GSTIN, CGST, or HSN). Running missing-field warnings on every invoice would bury the real failures. The checks run when the text contains GSTIN, CGST, SGST, UTGST, IGST, HSN, or SAC.
+
+The modulus-36 check was verified against the published worked example `27AAACR5055K1Z7` (the last character is 7). That value is a test vector only. Synthetic fixtures use `27ABCCE1234F1Z2`.
+
 ## Schema-driven, not hardcoded, document types and fields
 
 **Decision:** `config/schema.json` is the single source of truth for

@@ -8,7 +8,8 @@
  * and total amount.
  *
  * Each field in config/schema.json names an `extractor` (labeledId / company
- * / address / date / amount); this module maps those names to functions.
+ * / address / date / amount / labeledAmount / gstin / pan / hsnSac /
+ * placeOfSupply / gstLines); this module maps those names to functions.
  * Classification (which document type) is scored from the per-type keyword
  * lists in the schema. Everything here is deterministic and inspectable —
  * there is no model to train and nothing leaves the machine.
@@ -119,21 +120,34 @@ const MONEY_LABELED = /(\d{1,3}(?:,\d{2,3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)/;
  *
  * @param {string[]} lines
  * @param {object} field
+ * @param {{ fallback?: boolean }} [options] `fallback: false` is the labeled-only
+ *   path (CGST, taxable value, …). Those fields must stay null when the label
+ *   is absent — filling them with the largest number in the document would
+ *   invent a tax amount.
  * @returns {string|null}
  */
-const extractAmount = (lines, field) => {
-  const labels = field.labels || [];
+const extractAmount = (lines, field, { fallback = true } = {}) => {
+  const labels = [...(field.labels || [])].sort((a, b) => b.length - a.length);
   let labeledValue = null;
 
   for (const line of lines) {
     for (const label of labels) {
       const labelPattern = escapeRegExp(label).replace(/\\?\s+/g, '\\s+');
-      const re = new RegExp(`\\b${labelPattern}\\b\\s*[:.]?\\s*` + CURRENCY.source + MONEY_LABELED.source + `\\b`, 'i');
+      // Optional "9%" or "@ 9%:" between the label and the amount, so
+      // "CGST @ 9%: 1,080.00" and "CGST: 1,080.00" both hit.
+      const re = new RegExp(
+        `\\b${labelPattern}\\b(?:\\s*[:.]|\\s+@)?\\s*(?:\\d{1,2}(?:\\.\\d+)?\\s*%)?\\s*[:.]?\\s*` +
+          CURRENCY.source +
+          MONEY_LABELED.source +
+          `\\b`,
+        'i',
+      );
       const m = line.match(re);
       if (m) labeledValue = m[1]; // keep the last (lowest-in-doc) labeled match
     }
   }
   if (labeledValue) return labeledValue;
+  if (!fallback) return null;
 
   // Fallback: largest money-FORMATTED number anywhere (never a bare integer).
   let best = null;
@@ -305,6 +319,136 @@ const extractAddress = (lines) => {
 };
 
 // ---------------------------------------------------------------------------
+// Indian GST fields
+// ---------------------------------------------------------------------------
+
+/** Longer labels first so "GSTIN/UIN" wins over "GSTIN" and "HSN/SAC" over "HSN". */
+const labelsLongestFirst = (field) => [...(field.labels || [])].sort((a, b) => b.length - a.length);
+
+const labelRest = (line, label) => {
+  const labelPattern = escapeRegExp(label).replace(/\\?\s+/g, '\\s+');
+  const match = line.match(new RegExp(`\\b${labelPattern}\\b\\s*[:.#-]?\\s*(.*)$`, 'i'));
+  return match ? match[1].trim() : null;
+};
+
+/**
+ * GSTIN as printed. A labeled token is returned even when it is the wrong
+ * length, so validation can warn instead of dropping it. Case is folded to
+ * uppercase because a GSTIN is defined in uppercase. The check character is
+ * not recomputed here.
+ *
+ * @param {string[]} lines
+ * @param {object} field
+ * @returns {string|null}
+ */
+const extractGstin = (lines, field) => {
+  for (const line of lines) {
+    for (const label of labelsLongestFirst(field)) {
+      const rest = labelRest(line, label);
+      if (!rest) continue;
+      const token = rest.match(/[A-Za-z0-9]{5,20}/);
+      if (token) return token[0].toUpperCase();
+    }
+  }
+  const found = lines.join('\n').match(/\b\d{2}[A-Za-z]{5}\d{4}[A-Za-z][1-9A-Za-z][A-Za-z][0-9A-Za-z]\b/);
+  return found ? found[0].toUpperCase() : null;
+};
+
+/**
+ * Labeled PAN wins, including a PAN that fails the format check. Only when
+ * no PAN label is present do we read the 10 characters inside a GSTIN-shaped
+ * token. That is how the number is printed on many invoices, not a repair
+ * of a different PAN.
+ *
+ * @param {string[]} lines
+ * @param {object} field
+ * @returns {string|null}
+ */
+const extractPan = (lines, field) => {
+  for (const line of lines) {
+    for (const label of labelsLongestFirst(field)) {
+      const rest = labelRest(line, label);
+      if (!rest) continue;
+      const token = rest.match(/[A-Za-z0-9]{5,12}/);
+      if (token) return token[0].toUpperCase();
+    }
+  }
+  const gstin = lines.join('\n').match(/\b\d{2}([A-Za-z]{5}\d{4}[A-Za-z])[1-9A-Za-z][A-Za-z][0-9A-Za-z]\b/);
+  return gstin ? gstin[1].toUpperCase() : null;
+};
+
+const HSN_STOP = /^(?:item|taxable|cgst|sgst|utgst|igst|line|total|amount|value|qty|quantity|rate|rs|inr)$/i;
+const HSN_MONEY = /^\d{1,3}(?:,\d{2,3})+(?:\.\d{1,2})?$|^\d+\.\d{1,2}$/;
+
+/**
+ * Every HSN/SAC token after a configured label, in order, including tokens
+ * that are not valid codes. Money amounts and the next column label stop
+ * the scan so "HSN: 84713010 Taxable: 10,000.00" does not swallow the amount.
+ *
+ * @param {string[]} lines
+ * @param {object} field
+ * @returns {string|null}
+ */
+const extractHsnSac = (lines, field) => {
+  const codes = [];
+  for (const line of lines) {
+    for (const label of labelsLongestFirst(field)) {
+      const rest = labelRest(line, label);
+      if (rest == null) continue;
+      // Split on whitespace only. Commas are thousands separators in amounts
+      // ("10,000.00") and also separators between codes ("84713010, 998314").
+      // A trailing comma is removed before the code/amount decision so a
+      // grouped amount is not chopped into a fake HSN.
+      for (const raw of rest.split(/\s+/)) {
+        const cleaned = raw.replace(/^[.,;:]+|[.,;:]+$/g, '');
+        if (!cleaned) continue;
+        if (HSN_STOP.test(cleaned) || HSN_MONEY.test(cleaned)) break;
+        for (const part of cleaned.split(',')) {
+          if (!part || HSN_MONEY.test(part)) continue;
+          codes.push(part.toUpperCase());
+        }
+      }
+      break;
+    }
+  }
+  const unique = [];
+  for (const code of codes) {
+    if (!unique.includes(code)) unique.push(code);
+  }
+  return unique.length ? unique.join(', ') : null;
+};
+
+/**
+ * The remainder of the place-of-supply line, as printed.
+ *
+ * @param {string[]} lines
+ * @param {object} field
+ * @returns {string|null}
+ */
+const extractPlaceOfSupply = (lines, field) => {
+  for (const line of lines) {
+    for (const label of labelsLongestFirst(field)) {
+      const rest = labelRest(line, label);
+      if (rest) return rest;
+    }
+  }
+  return null;
+};
+
+/**
+ * Lines that carry a line total, joined with " | " so the validator can sum
+ * them without us rewriting any amount. Lines that do not parse still travel
+ * through, and become a warning rather than disappearing.
+ *
+ * @param {string[]} lines
+ * @returns {string|null}
+ */
+const extractGstLines = (lines) => {
+  const hits = lines.filter((line) => /\bline\s+total\b/i.test(line));
+  return hits.length ? hits.join(' | ') : null;
+};
+
+// ---------------------------------------------------------------------------
 // Dispatch
 // ---------------------------------------------------------------------------
 
@@ -321,12 +465,24 @@ export const runExtractor = (field, doc) => {
       return extractLabeledId(doc.text, field);
     case 'amount':
       return extractAmount(doc.lines, field);
+    case 'labeledAmount':
+      return extractAmount(doc.lines, field, { fallback: false });
     case 'date':
       return extractDate(doc.lines, field);
     case 'company':
       return extractCompany(doc.lines);
     case 'address':
       return extractAddress(doc.lines);
+    case 'gstin':
+      return extractGstin(doc.lines, field);
+    case 'pan':
+      return extractPan(doc.lines, field);
+    case 'hsnSac':
+      return extractHsnSac(doc.lines, field);
+    case 'placeOfSupply':
+      return extractPlaceOfSupply(doc.lines, field);
+    case 'gstLines':
+      return extractGstLines(doc.lines);
     default:
       return null;
   }

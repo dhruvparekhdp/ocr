@@ -12,7 +12,7 @@
     "classify": "node index.js",
     "web": "node server.js",
     "generate-samples": "node scripts/generate-samples.js",
-    "test": "node scripts/generate-samples.js && node index.js ./sample_pdfs"
+    "test": "node --test test/*.test.js && node scripts/generate-samples.js && node index.js ./sample_pdfs"
   },
   "keywords": [
     "pdf",

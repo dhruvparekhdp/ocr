@@ -114,3 +114,7 @@ added following an explicit instruction: keep project context, decisions,
 and rationale in the codebase itself rather than only in conversation
 history, so a future session (with no memory of these conversations) can
 reconstruct the full picture from the repo alone.
+
+## 8. Indian GST fields and warnings
+
+Invoice extraction now includes GSTIN, PAN, HSN/SAC, taxable value, CGST, SGST (or UTGST), IGST, place of supply, and line totals. `gstValidate.js` checks format and the tax arithmetic and records failures as warnings. Printed values are not replaced. Synthetic invoices are in `fixtures/gst-invoices.json`. See `DECISIONS.md`.

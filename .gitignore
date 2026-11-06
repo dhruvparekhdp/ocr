@@ -2,4 +2,6 @@ node_modules/
 batches.json
 sample_pdfs/
 pdfs/
+fixtures/out/
+.env
 *.log

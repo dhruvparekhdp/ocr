@@ -15,12 +15,10 @@
  */
 
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { createWorker } from 'tesseract.js';
 
 const require = createRequire(import.meta.url);
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /**
  * Resolves the directory holding eng.traineddata.gz. tesseract.js's `langPath`
@@ -65,6 +63,7 @@ const getWorker = () => {
 // pipeline runs several PDFs concurrently, their OCR calls would otherwise
 // hit the same worker at once and race. This promise chain serializes every
 // recognize() call so they queue cleanly behind one another.
+/** @type {Promise<unknown>} */
 let recognizeChain = Promise.resolve();
 
 /**

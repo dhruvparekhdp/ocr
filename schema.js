@@ -20,6 +20,34 @@ import process from 'node:process';
 
 const DEFAULT_SCHEMA_PATH = path.join(process.cwd(), 'config', 'schema.json');
 
+/**
+ * @typedef {object} DocumentTypeConfig
+ * @property {string} name
+ * @property {string} [description]
+ * @property {string[]} [keywords]
+ * @property {number} [keywordWeight]
+ */
+
+/**
+ * @typedef {object} FieldConfig
+ * @property {string} name
+ * @property {string} [description]
+ * @property {string} [extractor]
+ * @property {string[]} [labels]
+ * @property {string[]} [appliesTo]
+ * @property {boolean} [isBatchKey]
+ */
+
+/**
+ * @typedef {object} SchemaConfig
+ * @property {string} [productName]
+ * @property {string} [primaryColor]
+ * @property {string|null} [logoUrl]
+ * @property {DocumentTypeConfig[]} documentTypes
+ * @property {FieldConfig[]} fields
+ */
+
+/** @type {SchemaConfig|null} */
 let cachedSchema = null;
 
 /**
@@ -28,7 +56,7 @@ let cachedSchema = null;
  * consumer trivially consistent within one run, same rationale as
  * resolveAnalyzer's memoization in index.js).
  *
- * @returns {object} The parsed schema config.
+ * @returns {SchemaConfig} The parsed schema config.
  */
 export const loadSchema = () => {
   if (cachedSchema) return cachedSchema;
@@ -51,10 +79,10 @@ export const loadSchema = () => {
 /** @returns {string[]} All configured document type names, in schema order. */
 export const getDocumentTypeNames = () => loadSchema().documentTypes.map((t) => t.name);
 
-/** @returns {object[]} The full documentTypes config array (name, description, keywords, keywordWeight). */
+/** @returns {DocumentTypeConfig[]} The full documentTypes config array (name, description, keywords, keywordWeight). */
 export const getDocumentTypes = () => loadSchema().documentTypes;
 
-/** @returns {object[]} The full fields config array (name, description, labels, appliesTo, isBatchKey). */
+/** @returns {FieldConfig[]} The full fields config array (name, description, labels, appliesTo, isBatchKey). */
 export const getFields = () => loadSchema().fields;
 
 /** @returns {string[]} All field names configured anywhere (the union across document types). */
@@ -62,7 +90,7 @@ export const getAllFieldNames = () => getFields().map((f) => f.name);
 
 /**
  * @param {string} documentType
- * @returns {object[]} Field configs that apply to this document type (empty array if the type isn't found or has no fields).
+ * @returns {FieldConfig[]} Field configs that apply to this document type (empty array if the type isn't found or has no fields).
  */
 export const getFieldsForType = (documentType) =>
   getFields().filter((f) => !f.appliesTo || f.appliesTo.includes(documentType));

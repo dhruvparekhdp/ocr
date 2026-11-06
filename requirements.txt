@@ -1,0 +1,3 @@
+# This repository is a Node.js app and has no Python packages.
+# CI runs: pip-audit -r requirements.txt
+# Add a pinned package here only when the app actually depends on it.

@@ -38,7 +38,9 @@ any point in this pipeline (see `docs/DECISIONS.md` — "no cloud, no LLM").
 | `index.js` | Orchestration. `processDirectory`/`processBuffers` run ingestion+analysis over many files with bounded concurrency (`mapWithConcurrency`, limit 4 — kept low because OCR rasterization is memory-heavy and OCR itself is serialized on one worker anyway). `segregateIntoBatches` unions documents that share a value in any batch-key field (a `UnionFind`/disjoint-set implementation) and shapes the final `{ batches, unbatched }`. Also the CLI entry point (`node index.js [pdfDir] [outFile]`). |
 | `server.js` | Express server. Serves `public/index.html`, `GET /api/config` (branding + document types + field list, for the UI to render dynamically), and `POST /api/classify` (multipart upload, processed entirely in memory, same pipeline as the CLI). Tears down the OCR worker on `SIGINT`/`SIGTERM` so the process exits cleanly. |
 | `public/index.html` | The bulk-upload single-page UI. Fetches `/api/config` on load to set branding (title, header, accent color, optional logo) and knows nothing about specific document types or fields ahead of time — it renders whatever comes back from `/api/classify`, including an "OCR" badge on documents whose text came from the OCR path. |
-| `scripts/generate-samples.js` | Dev-only sample PDF generator (`pdfkit` + `@napi-rs/canvas`), used by `npm test`. Generates both text-based PDFs and one image-only ("scanned") PDF, so the smoke test exercises both ingestion paths, not just the easy one. |
+| `scripts/generate-samples.js` | Dev-only sample PDF generator (`pdfkit` + `@napi-rs/canvas`). Optional manual samples; CI does not use this script. |
+| `fixtures/manifest.json` / `fixtures/generate.js` | Synthetic invoices, receipts, purchase orders, and transaction lists, with the field values `npm test` asserts. Scan pages are PNGs drawn with Liberation Sans and embedded in image-only PDFs. |
+| `test/*.js` | `node:test` checks: fixture fields and batching, `.env.example` names only, and that `tesseract` / `pdftotext` / Liberation Sans are installed. |
 
 ## Data shapes
 

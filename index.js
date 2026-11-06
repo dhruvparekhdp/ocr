@@ -30,6 +30,22 @@ import { analyzeText } from './analyze.js';
 import { extractTextFromBuffer, extractTextFromPdfFile } from './pdfIngest.js';
 import { terminateOcr, ocrWasUsed } from './ocr.js';
 
+/**
+ * @typedef {object} AnalyzedDocument
+ * @property {string} fileName
+ * @property {'text'|'ocr'} source
+ * @property {string} documentType
+ * @property {Record<string, string|null>} fields
+ */
+
+/**
+ * @typedef {object} BatchGroup
+ * @property {number} fileCount
+ * @property {Array<{ fileName: string, documentType: string, source: string }>} documents
+ * @property {string} [documentNumber]
+ * @property {string} [referenceNumber]
+ */
+
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
@@ -81,7 +97,7 @@ const mapWithConcurrency = async (items, worker, limit) => {
  *
  * @param {string} fileName
  * @param {{ text: string, source: 'text' | 'ocr' }} extracted
- * @returns {object}
+ * @returns {AnalyzedDocument}
  */
 const analyzeDocument = (fileName, extracted) => ({
   fileName,
@@ -95,7 +111,7 @@ const analyzeDocument = (fileName, extracted) => ({
  * PDF must not sink the whole run.
  *
  * @param {string} dirPath Directory containing the PDFs.
- * @returns {Promise<{ analyzedDocs: Array<object>, errors: Array<object> }>}
+ * @returns {Promise<{ analyzedDocs: AnalyzedDocument[], errors: Array<{ fileName: string, reason: string }> }>}
  */
 export const processDirectory = async (dirPath) => {
   const entries = await fs.readdir(dirPath, { withFileTypes: true });
@@ -132,7 +148,7 @@ export const processDirectory = async (dirPath) => {
  * ingestion + failure isolation as {@link processDirectory}.
  *
  * @param {Array<{ fileName: string, buffer: Buffer }>} files
- * @returns {Promise<{ analyzedDocs: Array<object>, errors: Array<object> }>}
+ * @returns {Promise<{ analyzedDocs: AnalyzedDocument[], errors: Array<{ fileName: string, reason: string }> }>}
  */
 export const processBuffers = async (files) => {
   const outcomes = await mapWithConcurrency(
@@ -191,8 +207,8 @@ class UnionFind {
  * `unbatched`, grouped by whichever batch-key field they do have a value for
  * (or "UNIDENTIFIED" if none).
  *
- * @param {Array<{fileName: string, documentType: string, fields: Record<string, string|null>}>} analyzedDocs
- * @returns {{ batches: object, unbatched: object }}
+ * @param {AnalyzedDocument[]} analyzedDocs
+ * @returns {{ batches: Record<string, BatchGroup>, unbatched: Record<string, AnalyzedDocument[]> }}
  */
 export const segregateIntoBatches = (analyzedDocs) => {
   const batchKeyFields = getBatchKeyFields();

@@ -59,7 +59,7 @@ const ID_TOKEN = /((?=[A-Za-z0-9/_-]*\d)[A-Za-z0-9][A-Za-z0-9/_-]{2,})/;
  * sometimes a stray column number, so we scan past too-short hits).
  *
  * @param {string} text  Collapsed single-line text.
- * @param {object} field The field config (uses field.labels).
+ * @param {import('./schema.js').FieldConfig} field The field config (uses field.labels).
  * @returns {string|null}
  */
 const extractLabeledId = (text, field) => {
@@ -118,7 +118,7 @@ const MONEY_LABELED = /(\d{1,3}(?:,\d{2,3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)/;
  * any currency symbol.
  *
  * @param {string[]} lines
- * @param {object} field
+ * @param {import('./schema.js').FieldConfig} field
  * @returns {string|null}
  */
 const extractAmount = (lines, field) => {
@@ -175,7 +175,7 @@ const DATE_PATTERNS = [
  * locale-ambiguous and normalizing risks corrupting the value).
  *
  * @param {string[]} lines
- * @param {object} field
+ * @param {import('./schema.js').FieldConfig} field
  * @returns {string|null}
  */
 const extractDate = (lines, field) => {
@@ -311,7 +311,7 @@ const extractAddress = (lines) => {
 /**
  * Runs the extractor named by a field config against the document text.
  *
- * @param {object} field  A field config from schema.json (has .extractor).
+ * @param {import('./schema.js').FieldConfig} field  A field config from schema.json (has .extractor).
  * @param {{ text: string, lines: string[] }} doc Pre-split document text.
  * @returns {string|null}
  */

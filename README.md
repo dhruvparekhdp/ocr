@@ -137,10 +137,18 @@ fields, and an **OCR** tag on any document whose text came from OCR. Branding
 and the field/type list come from `GET /api/config`, so the UI reflects
 whatever schema is active.
 
+### Batch JSONL
+
+```bash
+node batch.js ./pdfs --out results.jsonl --workers 4
+```
+
+One JSON object per document. The run is resumable: a file whose sha256 already has `status: "ok"` in that JSONL is skipped, including after a rename. Failures are written and tried again on the next run. `--workers` extracts several PDFs at once. Tesseract stays on one worker, so OCR does not fan out with `--workers`. The summary (counts, failures, low-confidence fields) is printed to stderr. A field is low-confidence when it was not found on its label line, or when OCR scaled that score under 0.6. That score is a heuristic, not a probability.
+
 ### Smoke test
 
 ```bash
-npm test   # generates sample PDFs (including one scanned/OCR PDF) and runs the pipeline
+npm test   # unit tests, then sample PDFs (including one scanned/OCR PDF) through the pipeline
 ```
 
 ## Output shape
@@ -175,7 +183,9 @@ npm test   # generates sample PDFs (including one scanned/OCR PDF) and runs the 
 | --- | --- |
 | `config/schema.json` | Document types, fields (+ their `extractor`), batch keys, branding. The only file to edit for a new client. |
 | `schema.js` | Loads/validates the schema; exports getters used everywhere else. |
-| `pdfIngest.js` | PDF → text, with the offline-OCR fallback for scanned PDFs. Reports `text` vs `ocr`. |
+| `pdfIngest.js` | PDF → text, with the offline-OCR fallback for scanned PDFs. Page banners are ignored when deciding the text floor. Reports `text` vs `ocr`. |
+| `batch.js` | Folder → JSONL. Resume by sha256, parallel workers, summary of counts, failures, and low-confidence fields. |
+| `fieldConfidence.js` | Heuristic field score used only by that summary. |
 | `ocr.js` | Offline tesseract.js worker (local engine + language data); serialized so concurrent calls queue safely. |
 | `imagePreprocess.js` | Pre-OCR image cleanup: conditional upscale, grayscale, median denoise, Otsu binarization. |
 | `extractors.js` | The from-scratch field heuristics — one function per `extractor` type. |
@@ -243,11 +253,12 @@ doesn't. In rough priority order:
   with little work.
 - **Mixed PDFs** (some pages real text, some scanned) take the text path off
   the first pages and may skip OCR on the image pages — the text/scanned
-  decision is currently whole-document, not per-page.
-- **No confidence scores.** Every field is returned as a value or `null`, with
-  no indication of how sure the heuristic is. For a review workflow, per-field
-  confidence (and surfacing low-confidence values for a human to check) would
-  be a valuable addition.
+  decision is currently whole-document, not per-page. Page-number banners
+  from pdf-parse are not treated as text, so a scan of 7 or more pages still
+  reaches OCR.
+- **The folder report (`batches.json`) still has no confidence.** `batch.js`
+  adds a label-vs-fallback score and lists fields under 0.6 in the summary.
+  It does not change the value. OCR multiplies that score by 0.8.
 - **No de-duplication or multi-currency parsing.** Amounts keep their printed
   formatting; currency is not separated out into its own field.
 

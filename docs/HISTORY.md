@@ -114,3 +114,7 @@ added following an explicit instruction: keep project context, decisions,
 and rationale in the codebase itself rather than only in conversation
 history, so a future session (with no memory of these conversations) can
 reconstruct the full picture from the repo alone.
+
+## 8. Resumable JSONL batch, and OCR for long scans
+
+`batch.js` writes one JSON line per PDF, skips sha256 values that already succeeded, retries failures, and prints counts, failures, and low-confidence fields. `pdfIngest.js` no longer lets pdf-parse page banners satisfy the text floor, so a 7-page scan is OCR'd. See `DECISIONS.md`. The fixture is `fixtures/sevenPageScan.js`.

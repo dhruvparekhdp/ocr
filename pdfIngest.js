@@ -29,18 +29,37 @@ import { preprocessForOcr } from './imagePreprocess.js';
 import { ocrImage } from './ocr.js';
 
 /**
- * If pdf-parse returns fewer than this many alphanumeric characters, the PDF
- * is treated as scanned/image-based and sent to OCR. Real text PDFs return
- * hundreds+; scanned PDFs return ~0 (just page markers). The floor is
- * deliberately low so a genuinely tiny (but real) text PDF isn't needlessly
- * OCR'd.
+ * If the embedded text has fewer than this many alphanumeric characters, the
+ * PDF is treated as scanned and sent to OCR. Real text PDFs return hundreds.
+ * The floor is low so a genuinely tiny text PDF is not needlessly OCR'd.
+ *
+ * pdf-parse appends a banner per page (`-- 1 of 7 --`). Those banners are not
+ * document text: seven of them are 28 alphanumeric characters and used to
+ * clear this floor, so a 7-page scan never reached OCR. Banners are ignored
+ * before the count.
  */
-const MIN_TEXT_CHARS = 25;
+export const MIN_TEXT_CHARS = 25;
 
 /** Higher scale → sharper render → better OCR accuracy, at more time/memory. 2 is a good balance. */
 const OCR_RENDER_SCALE = 2;
 
+/** pdf-parse page banner, e.g. "-- 3 of 7 --". */
+const PAGE_BANNER = /^--\s*\d+\s+of\s+\d+\s*--$/;
+
 const countAlnum = (text) => (text.match(/[A-Za-z0-9]/g) || []).length;
+
+/**
+ * Drops pdf-parse page banners, then counts letters and digits.
+ * @param {string} text
+ * @returns {number}
+ */
+export const substantiveAlnum = (text) => {
+  const body = String(text || '')
+    .split(/\r?\n/)
+    .filter((line) => !PAGE_BANNER.test(line.trim()))
+    .join('\n');
+  return countAlnum(body);
+};
 
 /**
  * Rasterizes every page and OCRs each, returning the concatenated text.
@@ -74,7 +93,7 @@ export const extractTextFromBuffer = async (buffer) => {
     const { text } = await parser.getText();
     const embeddedText = text || '';
 
-    if (countAlnum(embeddedText) >= MIN_TEXT_CHARS) {
+    if (substantiveAlnum(embeddedText) >= MIN_TEXT_CHARS) {
       return { text: embeddedText, source: 'text' };
     }
 

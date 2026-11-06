@@ -114,3 +114,7 @@ added following an explicit instruction: keep project context, decisions,
 and rationale in the codebase itself rather than only in conversation
 history, so a future session (with no memory of these conversations) can
 reconstruct the full picture from the repo alone.
+
+## 8. Dev setup, CI, and synthetic fixtures
+
+`npm run setup`, `npm run lint`, `npm run typecheck`, and `npm test` are the local commands (`make` targets call the same scripts). `npm test` used to generate sample PDFs and print a report without assertions. It now runs `node:test` against documents drawn from `fixtures/manifest.json`: text-layer and scanned invoices, purchase orders, receipts, and a bank-style transaction list, with expected field values in that manifest. GitHub Actions runs those checks plus gitleaks and pip-audit, and installs `tesseract-ocr`, `poppler-utils`, `fonts-liberation`, and `python3-venv` (pip-audit needs a virtualenv). No customer PDFs were added. See `DECISIONS.md` for why system Tesseract is installed but not used as the recognizer.

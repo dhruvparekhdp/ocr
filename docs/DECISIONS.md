@@ -129,6 +129,16 @@ union-find over shared identifiers generalizes to any set of document types
 and relationships the schema defines, without the batching code needing to
 know what those types mean.
 
+## CI checks the vendored pipeline; system Tesseract is only installed
+
+**Decision:** `npm test` generates synthetic documents from `fixtures/manifest.json` and asserts classification, fields, and batching through `pdfIngest` / `analyzeText` / `processDirectory`. Scanned fixtures are PNG images plus image-only PDFs. GitHub Actions also installs the `tesseract-ocr` and `poppler-utils` apt packages and fails if `tesseract` or `pdftotext` is missing. The product recognizer is still `ocr.js` (tesseract.js with vendored English data). The tests do not shell out to system Tesseract to read documents.
+
+**Why:** The ticket asked for one-command setup, lint, typecheck, test, gitleaks, pip-audit, and those system packages in CI, with fixture values that are known because we drew them. Switching recognition onto the system binary would change results and drop the air-gapped WASM path recorded above. Installing the packages still makes the CI image honest about the tools a document box usually has, and Liberation Sans (also installed there) keeps scan rendering on a real font file instead of an unspecified `sans-serif`.
+
+**pip-audit:** `requirements.txt` lists no packages. The app is Node-only. The scan is in CI so a Python dependency cannot show up later without being audited. pip-audit creates a temporary virtualenv, so CI and `scripts/setup.sh` install `python3-venv` (without it the tool exits before scanning). gitleaks scans git history. `.env.example` names `PORT` and `SCHEMA_PATH` and stores no values; those are the only `process.env` reads, and the process does not load dotenv.
+
+**Lint and typecheck:** ESLint (`recommended`) and `tsc --noEmit` with `allowJs` / `checkJs` and `strict: false`. `strict: false` is deliberate so typecheck covers the existing JavaScript without a rewrite. JSDoc on the schema and the analyzed-document shape is what makes `checkJs` able to see field names.
+
 ## Schema-driven, not hardcoded, document types and fields
 
 **Decision:** `config/schema.json` is the single source of truth for

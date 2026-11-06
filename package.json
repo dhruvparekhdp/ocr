@@ -12,7 +12,13 @@
     "classify": "node index.js",
     "web": "node server.js",
     "generate-samples": "node scripts/generate-samples.js",
-    "test": "node scripts/generate-samples.js && node index.js ./sample_pdfs"
+    "generate-fixtures": "node scripts/generate-fixtures.js",
+    "setup": "bash scripts/setup.sh",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --test test/*.js",
+    "check": "npm run lint && npm run typecheck && npm test",
+    "audit:secrets": "bash scripts/security-scan.sh"
   },
   "keywords": [
     "pdf",
@@ -32,6 +38,11 @@
     "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
-    "pdfkit": "^0.15.2"
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.6.6",
+    "eslint": "^10.14.0",
+    "globals": "^17.14.0",
+    "pdfkit": "^0.15.2",
+    "typescript": "^7.0.2"
   }
 }

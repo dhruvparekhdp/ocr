@@ -137,11 +137,26 @@ fields, and an **OCR** tag on any document whose text came from OCR. Branding
 and the field/type list come from `GET /api/config`, so the UI reflects
 whatever schema is active.
 
-### Smoke test
+### Development
+
+One-command setup installs Node dependencies and, on Debian/Ubuntu, the system packages the checks expect (`tesseract-ocr`, `poppler-utils`, `fonts-liberation`):
 
 ```bash
-npm test   # generates sample PDFs (including one scanned/OCR PDF) and runs the pipeline
+npm run setup          # or: make setup
 ```
+
+Then:
+
+```bash
+npm run lint           # or: make lint
+npm run typecheck      # or: make typecheck
+npm test               # or: make test
+npm run check          # lint, typecheck, and test
+```
+
+`npm test` builds synthetic invoices, receipts, purchase orders, and bank-style transaction lists from `fixtures/manifest.json` (text PDFs and PNG scans wrapped as image-only PDFs) and checks document type, field values, row text, and batching. The fixtures are generated in a temp directory. They are not customer documents. `npm run generate-fixtures` writes the same files under `./fixtures/out` when you want to look at them.
+
+GitHub Actions (`.github/workflows/ci.yml`) runs that setup's system packages, gitleaks, pip-audit, lint, typecheck, and test on every push and pull request. `make audit` runs the same gitleaks and pip-audit commands locally. pip-audit needs `python3-venv`, which `npm run setup` installs on apt-based systems. `.env.example` lists `PORT` and `SCHEMA_PATH` with empty values. The app does not load a `.env` file on its own. `requirements.txt` has no Python packages; pip-audit is there so a future Python dependency is scanned. Recognition stays on vendored tesseract.js. The system `tesseract` and `pdftotext` binaries are installed for the environment, and the tests only check that those binaries exist.
 
 ## Output shape
 
@@ -183,7 +198,12 @@ npm test   # generates sample PDFs (including one scanned/OCR PDF) and runs the 
 | `index.js` | Orchestration: folder/buffer processing with bounded concurrency, union-find batching, CLI entry point. |
 | `server.js` | Express server: web UI, `GET /api/config`, `POST /api/classify` (in-memory). |
 | `public/index.html` | Bulk-upload UI — dynamic fields/branding, OCR tags. |
-| `scripts/generate-samples.js` | Dev-only sample generator (text PDFs + one scanned/OCR PDF). |
+| `scripts/generate-samples.js` | Dev-only sample generator (text PDFs + one scanned/OCR PDF). Not the CI test. |
+| `fixtures/manifest.json` | Synthetic document text and the field values tests expect. |
+| `fixtures/generate.js` | Draws those fixtures (text PDF, plus PNG and image-only PDF for scans). |
+| `scripts/setup.sh` | `npm run setup`: system packages (when apt is available) and `npm ci`. |
+| `scripts/security-scan.sh` | gitleaks and pip-audit. |
+| `.github/workflows/ci.yml` | Push/PR CI. |
 
 ## Gaps and limitations
 

@@ -179,11 +179,13 @@ npm test   # generates sample PDFs (including one scanned/OCR PDF) and runs the 
 | `ocr.js` | Offline tesseract.js worker (local engine + language data); serialized so concurrent calls queue safely. |
 | `imagePreprocess.js` | Pre-OCR image cleanup: conditional upscale, grayscale, median denoise, Otsu binarization. |
 | `extractors.js` | The from-scratch field heuristics — one function per `extractor` type. |
-| `analyze.js` | Classify + extract: text → `{ documentType, fields }`. |
+| `analyze.js` | Classify + extract: text → `{ documentType, fields, warnings }`. |
 | `index.js` | Orchestration: folder/buffer processing with bounded concurrency, union-find batching, CLI entry point. |
 | `server.js` | Express server: web UI, `GET /api/config`, `POST /api/classify` (in-memory). |
-| `public/index.html` | Bulk-upload UI — dynamic fields/branding, OCR tags. |
-| `scripts/generate-samples.js` | Dev-only sample generator (text PDFs + one scanned/OCR PDF). |
+| `gstValidate.js` | Indian GST checks (GSTIN checksum, PAN, HSN/SAC, tax split, line totals). Warnings only — printed values are not rewritten. |
+| `public/index.html` | Bulk-upload UI — dynamic fields/branding, OCR tags, warning counts. |
+| `fixtures/gst-invoices.json` | Synthetic GST invoices with known fields and expected warning codes. |
+| `scripts/generate-samples.js` | Dev-only sample generator (text PDFs, one scanned/OCR PDF, and the GST fixtures). |
 
 ## Gaps and limitations
 
@@ -244,10 +246,15 @@ doesn't. In rough priority order:
 - **Mixed PDFs** (some pages real text, some scanned) take the text path off
   the first pages and may skip OCR on the image pages — the text/scanned
   decision is currently whole-document, not per-page.
-- **No confidence scores.** Every field is returned as a value or `null`, with
-  no indication of how sure the heuristic is. For a review workflow, per-field
-  confidence (and surfacing low-confidence values for a human to check) would
-  be a valuable addition.
+- **No confidence scores.** Every field is returned as a value or `null`.
+  GST problems are separate warnings (`warnings` on each document), not a
+  confidence. A checksum or total mismatch does not change the printed value.
+- **GST checks are format and arithmetic, not a registry lookup.** A GSTIN
+  can pass the modulus-36 check and still belong to nobody. Line items are
+  read only when a line contains HSN, taxable, CGST, SGST, IGST, and a line
+  total in that order. The cross-check tolerance is one rupee. A wrapped PDF
+  line can split that pattern; the synthetic GST PDFs use a wide page so the
+  line stays intact.
 - **No de-duplication or multi-currency parsing.** Amounts keep their printed
   formatting; currency is not separated out into its own field.
 

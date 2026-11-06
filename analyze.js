@@ -11,6 +11,7 @@
 
 import { getDocumentTypes, getFields, getFieldsForType } from './schema.js';
 import { runExtractor, splitLines } from './extractors.js';
+import { runSchemaValidator } from './gstValidate.js';
 
 const UNKNOWN_TYPE = 'Unknown';
 
@@ -59,7 +60,7 @@ const classify = (collapsedText) => {
  * Classifies a document and extracts its applicable fields.
  *
  * @param {string} rawText Full text of one document (from pdfIngest).
- * @returns {{ documentType: string, fields: Record<string, string|null> }}
+ * @returns {{ documentType: string, fields: Record<string, string|null>, warnings: Array<{code: string, message: string}> }}
  */
 export const analyzeText = (rawText) => {
   const collapsedText = rawText.replace(/\s+/g, ' ');
@@ -67,12 +68,16 @@ export const analyzeText = (rawText) => {
   const doc = { text: collapsedText, lines };
 
   const documentType = classify(collapsedText);
-  const applicable = new Set(getFieldsForType(documentType).map((f) => f.name));
+  const fieldConfigs = getFieldsForType(documentType);
+  const applicable = new Set(fieldConfigs.map((f) => f.name));
 
   const fields = {};
   for (const field of getFields()) {
     fields[field.name] = applicable.has(field.name) ? runExtractor(field, doc) : null;
   }
 
-  return { documentType, fields };
+  const typeConfig = getDocumentTypes().find((type) => type.name === documentType);
+  const warnings = runSchemaValidator(typeConfig?.validate, { fields, fieldConfigs, text: rawText });
+
+  return { documentType, fields, warnings };
 };

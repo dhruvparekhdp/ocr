@@ -279,8 +279,16 @@
       ? '<span class="type-badge" style="background:#3a2d16;color:#f0c674" title="Text obtained via OCR">OCR</span>'
       : '';
 
+  const warningTag = (doc) => {
+    const warnings = Array.isArray(doc.warnings) ? doc.warnings : [];
+    if (warnings.length === 0) return '';
+    const title = warnings.map((warning) => warning.message || warning.code).join('\n');
+    const label = warnings.length === 1 ? '1 warning' : `${warnings.length} warnings`;
+    return `<span class="type-badge" style="background:#3a1d16;color:#f0a090" title="${escapeHtml(title)}">${escapeHtml(label)}</span>`;
+  };
+
   const docChip = (doc) =>
-    `<span class="doc-chip">${typeBadge(doc.documentType)} ${sourceTag(doc)} ${escapeHtml(doc.fileName)} ${fieldsSummary(doc.fields)}</span>`;
+    `<span class="doc-chip">${typeBadge(doc.documentType)} ${sourceTag(doc)} ${warningTag(doc)} ${escapeHtml(doc.fileName)} ${fieldsSummary(doc.fields)}</span>`;
 
   const formatBytes = (bytes) => {
     if (bytes < 1024) return `${bytes} B`;

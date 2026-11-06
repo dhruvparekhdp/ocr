@@ -230,7 +230,13 @@ export const segregateIntoBatches = (analyzedDocs) => {
       const firstKeyField = batchKeyFields.find((f) => doc.fields?.[f]);
       const key = firstKeyField ? `${firstKeyField}:${doc.fields[firstKeyField]}` : 'UNIDENTIFIED';
       if (!unbatched[key]) unbatched[key] = [];
-      unbatched[key].push({ fileName: doc.fileName, documentType: doc.documentType, source: doc.source, fields: doc.fields });
+      unbatched[key].push({
+        fileName: doc.fileName,
+        documentType: doc.documentType,
+        source: doc.source,
+        fields: doc.fields,
+        warnings: doc.warnings ?? [],
+      });
       continue;
     }
 
@@ -255,7 +261,12 @@ export const segregateIntoBatches = (analyzedDocs) => {
     batches[`BATCH-${batchLabel}`] = {
       ...keyFieldValues,
       fileCount: docsInGroup.length,
-      documents: docsInGroup.map((doc) => ({ fileName: doc.fileName, documentType: doc.documentType, source: doc.source })),
+      documents: docsInGroup.map((doc) => ({
+        fileName: doc.fileName,
+        documentType: doc.documentType,
+        source: doc.source,
+        warnings: doc.warnings ?? [],
+      })),
     };
   }
 
@@ -286,6 +297,7 @@ const main = async () => {
       failed: errors.length,
       batches: Object.keys(batches).length,
       unbatchedGroups: Object.keys(unbatched).length,
+      warningCount: analyzedDocs.reduce((count, doc) => count + (doc.warnings?.length || 0), 0),
     },
     batches,
     unbatched,
